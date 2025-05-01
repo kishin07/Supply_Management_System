@@ -41,7 +41,7 @@ A comprehensive web application for managing supply chain operations with three 
 
 ```bash
 # Clone the repository
-git clone [repository-url]
+git clone https://github.com/kishin07/Supply_Management_System.git
 
 # Navigate to the project directory
 cd supply-chain-management
