@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
+import supabase from '../../supabase';
 import {
   Container,
   Grid,
@@ -17,7 +19,10 @@ import {
   DialogContent,
   DialogActions,
   IconButton,
-  Box
+  Box,
+  CircularProgress,
+  Alert,
+  Snackbar
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -27,32 +32,69 @@ import {
 } from '@mui/icons-material';
 
 const InventoryManagement = ({ setSelectedView }) => {
-  const [inventory, setInventory] = useState([
-    { id: 1, name: 'Raw Material A', quantity: 100, category: 'Raw Materials', status: 'In Stock' },
-    { id: 2, name: 'Product B', quantity: 50, category: 'Finished Goods', status: 'Low Stock' },
-    { id: 3, name: 'Component C', quantity: 75, category: 'Work in Progress', status: 'In Stock' },
-  ]);
-
+  const { currentUser } = useAuth();
+  const [inventory, setInventory] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [openDialog, setOpenDialog] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
   const [formData, setFormData] = useState({
-    name: '',
-    quantity: '',
-    category: '',
-    status: ''
+    item_name: '',
+    item_quantity: '',
+    item_category: '',
+    item_status: ''
   });
+  const [snackbar, setSnackbar] = useState({
+    open: false,
+    message: '',
+    severity: 'success'
+  });
+
+  // Fetch inventory items from Supabase
+  useEffect(() => {
+    const fetchInventory = async () => {
+      if (!currentUser) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from('supplier_items')
+          .select('*')
+          .eq('supplier_id', currentUser.id);
+
+        if (error) throw error;
+        
+        setInventory(data || []);
+        setError(null);
+      } catch (err) {
+        console.error('Error fetching inventory:', err);
+        setError('Failed to load inventory items. Please try again.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchInventory();
+  }, [currentUser]);
 
   const handleOpenDialog = (item = null) => {
     if (item) {
       setSelectedItem(item);
-      setFormData(item);
+      setFormData({
+        item_name: item.item_name,
+        item_quantity: item.item_quantity,
+        item_category: item.item_category,
+        item_status: item.item_status
+      });
     } else {
       setSelectedItem(null);
       setFormData({
-        name: '',
-        quantity: '',
-        category: '',
-        status: ''
+        item_name: '',
+        item_quantity: '',
+        item_category: '',
+        item_status: ''
       });
     }
     setOpenDialog(true);
@@ -62,10 +104,10 @@ const InventoryManagement = ({ setSelectedView }) => {
     setOpenDialog(false);
     setSelectedItem(null);
     setFormData({
-      name: '',
-      quantity: '',
-      category: '',
-      status: ''
+      item_name: '',
+      item_quantity: '',
+      item_category: '',
+      item_status: ''
     });
   };
 
@@ -77,27 +119,121 @@ const InventoryManagement = ({ setSelectedView }) => {
     }));
   };
 
-  const handleSubmit = () => {
-    if (selectedItem) {
-      // Update existing item
-      setInventory(prev =>
-        prev.map(item =>
-          item.id === selectedItem.id ? { ...item, ...formData } : item
-        )
-      );
-    } else {
-      // Add new item
-      const newItem = {
-        id: inventory.length + 1,
-        ...formData
-      };
-      setInventory(prev => [...prev, newItem]);
+  const handleSubmit = async () => {
+    if (!currentUser) {
+      setSnackbar({
+        open: true,
+        message: 'You must be logged in to perform this action',
+        severity: 'error'
+      });
+      return;
     }
-    handleCloseDialog();
+
+    try {
+      if (selectedItem) {
+        // Update existing item
+        const { error } = await supabase
+          .from('supplier_items')
+          .update({
+            item_name: formData.item_name,
+            item_quantity: formData.item_quantity,
+            item_category: formData.item_category,
+            item_status: formData.item_status
+          })
+          .eq('item_id', selectedItem.item_id);
+
+        if (error) throw error;
+
+        // Update local state
+        setInventory(prev =>
+          prev.map(item =>
+            item.item_id === selectedItem.item_id ? { ...item, ...formData } : item
+          )
+        );
+
+        setSnackbar({
+          open: true,
+          message: 'Item updated successfully',
+          severity: 'success'
+        });
+      } else {
+        // Add new item
+        const { data, error } = await supabase
+          .from('supplier_items')
+          .insert([
+            {
+              item_name: formData.item_name,
+              item_quantity: formData.item_quantity,
+              item_category: formData.item_category,
+              item_status: formData.item_status,
+              supplier_id: currentUser.id
+            }
+          ])
+          .select();
+
+        if (error) throw error;
+
+        // Update local state with the returned data
+        if (data && data.length > 0) {
+          setInventory(prev => [...prev, data[0]]);
+        }
+
+        setSnackbar({
+          open: true,
+          message: 'Item added successfully',
+          severity: 'success'
+        });
+      }
+    } catch (err) {
+      console.error('Error saving item:', err);
+      setSnackbar({
+        open: true,
+        message: `Failed to save item: ${err.message}`,
+        severity: 'error'
+      });
+    } finally {
+      handleCloseDialog();
+    }
   };
 
-  const handleDelete = (id) => {
-    setInventory(prev => prev.filter(item => item.id !== id));
+  const handleDelete = async (itemId) => {
+    if (!currentUser) {
+      setSnackbar({
+        open: true,
+        message: 'You must be logged in to perform this action',
+        severity: 'error'
+      });
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('supplier_items')
+        .delete()
+        .eq('item_id', itemId);
+
+      if (error) throw error;
+
+      // Update local state
+      setInventory(prev => prev.filter(item => item.item_id !== itemId));
+
+      setSnackbar({
+        open: true,
+        message: 'Item deleted successfully',
+        severity: 'success'
+      });
+    } catch (err) {
+      console.error('Error deleting item:', err);
+      setSnackbar({
+        open: true,
+        message: `Failed to delete item: ${err.message}`,
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleCloseSnackbar = () => {
+    setSnackbar(prev => ({ ...prev, open: false }));
   };
 
   return (
@@ -124,43 +260,59 @@ const InventoryManagement = ({ setSelectedView }) => {
         </Button>
       </Box>
 
-      <TableContainer component={Paper}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Name</TableCell>
-              <TableCell>Quantity</TableCell>
-              <TableCell>Category</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {inventory.map((item) => (
-              <TableRow key={item.id}>
-                <TableCell>{item.name}</TableCell>
-                <TableCell>{item.quantity}</TableCell>
-                <TableCell>{item.category}</TableCell>
-                <TableCell>{item.status}</TableCell>
-                <TableCell>
-                  <IconButton
-                    color="primary"
-                    onClick={() => handleOpenDialog(item)}
-                  >
-                    <EditIcon />
-                  </IconButton>
-                  <IconButton
-                    color="error"
-                    onClick={() => handleDelete(item.id)}
-                  >
-                    <DeleteIcon />
-                  </IconButton>
-                </TableCell>
+      {loading ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
+          <CircularProgress />
+        </Box>
+      ) : error ? (
+        <Alert severity="error" sx={{ my: 2 }}>{error}</Alert>
+      ) : (
+        <TableContainer component={Paper}>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>Name</TableCell>
+                <TableCell>Quantity</TableCell>
+                <TableCell>Category</TableCell>
+                <TableCell>Status</TableCell>
+                <TableCell>Actions</TableCell>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
+            </TableHead>
+            <TableBody>
+              {inventory.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={5} align="center">
+                    No inventory items found. Add your first item using the button above.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                inventory.map((item) => (
+                  <TableRow key={item.item_id}>
+                    <TableCell>{item.item_name}</TableCell>
+                    <TableCell>{item.item_quantity}</TableCell>
+                    <TableCell>{item.item_category}</TableCell>
+                    <TableCell>{item.item_status}</TableCell>
+                    <TableCell>
+                      <IconButton
+                        color="primary"
+                        onClick={() => handleOpenDialog(item)}
+                      >
+                        <EditIcon />
+                      </IconButton>
+                      <IconButton
+                        color="error"
+                        onClick={() => handleDelete(item.item_id)}
+                      >
+                        <DeleteIcon />
+                      </IconButton>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      )}
 
       <Dialog open={openDialog} onClose={handleCloseDialog}>
         <DialogTitle>
@@ -169,38 +321,38 @@ const InventoryManagement = ({ setSelectedView }) => {
         <DialogContent>
           <TextField
             margin="dense"
-            name="name"
+            name="item_name"
             label="Item Name"
             type="text"
             fullWidth
-            value={formData.name}
+            value={formData.item_name}
             onChange={handleInputChange}
           />
           <TextField
             margin="dense"
-            name="quantity"
+            name="item_quantity"
             label="Quantity"
             type="number"
             fullWidth
-            value={formData.quantity}
+            value={formData.item_quantity}
             onChange={handleInputChange}
           />
           <TextField
             margin="dense"
-            name="category"
+            name="item_category"
             label="Category"
             type="text"
             fullWidth
-            value={formData.category}
+            value={formData.item_category}
             onChange={handleInputChange}
           />
           <TextField
             margin="dense"
-            name="status"
+            name="item_status"
             label="Status"
             type="text"
             fullWidth
-            value={formData.status}
+            value={formData.item_status}
             onChange={handleInputChange}
           />
         </DialogContent>
@@ -211,6 +363,17 @@ const InventoryManagement = ({ setSelectedView }) => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <Snackbar 
+        open={snackbar.open} 
+        autoHideDuration={6000} 
+        onClose={handleCloseSnackbar}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert onClose={handleCloseSnackbar} severity={snackbar.severity} sx={{ width: '100%' }}>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Container>
   );
 };

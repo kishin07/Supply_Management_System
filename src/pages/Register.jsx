@@ -127,13 +127,24 @@ function Register() {
     setIsSubmitting(true)
     
     try {
-      // Call register function from AuthContext
+      // Call register function from AuthContext with Supabase
       await register(formData)
       
-      // Navigate to dashboard on success
-      navigate('/dashboard')
+      // Navigate to login page on success
+      navigate('/login')
     } catch (err) {
-      setSubmitError(err.message || 'Registration failed. Please try again.')
+      // Handle Supabase specific errors
+      if (err.message.includes('email')) {
+        setSubmitError('This email is already registered or invalid. Please use another email address.')
+      } else if (err.message.includes('password')) {
+        setSubmitError('Password error: ' + err.message)
+      } else if (err.message.includes('adding user to')) {
+        // Handle role-based table insertion errors
+        setSubmitError(err.message)
+      } else {
+        setSubmitError(err.message || 'Registration failed. Please try again.')
+      }
+      console.error('Registration error:', err)
     } finally {
       setIsSubmitting(false)
     }

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useAuth } from '../../contexts/AuthContext'; // Import useAuth
+import { useAuth } from '../../contexts/AuthContext';
+import supabase from '../../supabase';
 import {
   Container,
   Typography,
@@ -18,7 +19,9 @@ import {
   DialogTitle,
   DialogContent,
   DialogContentText,
-  DialogActions
+  DialogActions,
+  CircularProgress,
+  Alert
 } from '@mui/material';
 import {
   Visibility as ViewIcon,
@@ -27,86 +30,95 @@ import {
 } from '@mui/icons-material';
 
 const OrderView = ({ setSelectedView }) => {
-  const { currentUser } = useAuth(); // Get current user from AuthContext
-  // Load all orders from localStorage initially
-  const [allOrders, setAllOrders] = useState(() => {
-    const savedOrders = localStorage.getItem('orders');
-    return savedOrders ? JSON.parse(savedOrders) : [];
-  });
-
-  // State to hold orders filtered for the current supplier
-  const [filteredOrders, setFilteredOrders] = useState([]);
-
-  // Effect to filter orders when component mounts or currentUser/allOrders change
-  useEffect(() => {
-    if (currentUser && currentUser.role === 'supplier') {
-      // Filter orders for this supplier - strictly match by supplierId
-      const supplierOrders = allOrders.filter(order => {
-        // Only show orders specifically assigned to this supplier by ID
-        return order.supplierId === currentUser.id;
-      });
-      setFilteredOrders(supplierOrders);
-      
-      // Update the UI to show pending orders count
-      const pendingCount = supplierOrders.filter(order => 
-        order.status === 'Pending' || order.status === 'Processing'
-      ).length;
-      
-      console.log(`Found ${supplierOrders.length} orders for supplier ID: ${currentUser.id}, ${pendingCount} pending`);
-    } else {
-      // Handle case where user is not a supplier or not logged in
-      setFilteredOrders([]); 
-    }
-  }, [currentUser, allOrders]);
-
-  // Mock data (kept for reference, but filtering logic uses localStorage data)
-  const [mockOrders, setMockOrders] = useState([ // Renamed from 'orders' to avoid conflict
-    {
-      id: 1,
-      orderNumber: 'ORD-2023-001',
-      customerName: 'Tech Corp',
-      items: [
-        { name: 'Raw Material A', quantity: 50 },
-        { name: 'Component C', quantity: 25 }
-      ],
-      orderDate: '2023-07-15',
-      status: 'Pending',
-      totalAmount: 2500
-    },
-    {
-      id: 2,
-      orderNumber: 'ORD-2023-002',
-      customerName: 'Innovation Ltd',
-      items: [
-        { name: 'Product B', quantity: 30 }
-      ],
-      orderDate: '2023-07-16',
-      status: 'Processing',
-      totalAmount: 1800
-    },
-    {
-      id: 3,
-      orderNumber: 'ORD-2023-003',
-      customerName: 'Global Systems',
-      items: [
-        { name: 'Raw Material A', quantity: 100 },
-        { name: 'Product B', quantity: 20 }
-      ],
-      orderDate: '2023-07-17',
-      status: 'Ready to Ship',
-      totalAmount: 3500
-    }
-  ]);
-
-  // Effect to update localStorage when the main orders list changes (e.g., status update)
-  // Note: This assumes status updates modify the 'allOrders' state, which might need adjustment
-  // depending on how status updates are handled globally.
-  useEffect(() => {
-    localStorage.setItem('orders', JSON.stringify(allOrders));
-  }, [allOrders]);
-
+  const { currentUser } = useAuth();
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [openDialog, setOpenDialog] = useState(false);
+
+  useEffect(() => {
+    const fetchOrders = async () => {
+      if (!currentUser) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from('orders')
+          .select('*')
+          .eq('order_supplier', currentUser.id);
+
+        if (error) throw error;
+        setOrders(data || []);
+        setError(null);
+      } catch (err) {
+        console.error('Error fetching orders:', err);
+        setError('Failed to load orders. Please try again.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchOrders();
+  }, [currentUser]);
+
+  useEffect(() => {
+    const fetchOrderItems = async () => {
+      if (orders.length === 0) return;
+
+      try {
+        const orderIds = orders.map(order => order.order_id);
+        const { data, error } = await supabase
+          .from('order_items')
+          .select('*')
+          .in('order_id', orderIds);
+
+        if (error) throw error;
+
+        const ordersWithItems = orders.map(order => {
+          const items = data
+            .filter(item => item.order_id === order.order_id)
+            .map(item => ({
+              name: item.item_name,
+              quantity: item.quantity,
+              price: item.price
+            }));
+          return { ...order, items };
+        });
+
+        setOrders(ordersWithItems);
+      } catch (err) {
+        console.error('Error fetching order items:', err);
+      }
+    };
+
+    fetchOrderItems();
+  }, [orders.length]);
+
+  const updateOrderStatus = async (orderId, newStatus) => {
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({ order_status: newStatus })
+        .eq('order_id', orderId);
+
+      if (error) throw error;
+
+      setOrders(prev =>
+        prev.map(order =>
+          order.order_id === orderId
+            ? { ...order, order_status: newStatus }
+            : order
+        )
+      );
+      return true;
+    } catch (err) {
+      console.error('Error updating order status:', err);
+      return false;
+    }
+  };
 
   const handleViewDetails = (order) => {
     setSelectedOrder(order);
@@ -117,16 +129,12 @@ const OrderView = ({ setSelectedView }) => {
     setOpenDialog(false);
     setSelectedOrder(null);
   };
-``
-  const handleShipOrder = (orderId) => {
-    // Update the status in the main list (allOrders)
-    setAllOrders(prev =>
-      prev.map(order =>
-        order.id === orderId
-          ? { ...order, status: 'Shipped' }
-          : order
-      )
-    );
+
+  const handleShipOrder = async (orderId) => {
+    const success = await updateOrderStatus(orderId, 'Shipped');
+    if (!success) {
+      alert('Failed to update order status. Please try again.');
+    }
   };
 
   const getStatusColor = (status) => {
@@ -147,11 +155,7 @@ const OrderView = ({ setSelectedView }) => {
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
-        <IconButton 
-          color="primary" 
-          sx={{ mr: 2 }}
-          onClick={() => setSelectedView('dashboard')}
-        >
+        <IconButton color="primary" sx={{ mr: 2 }} onClick={() => setSelectedView('dashboard')}>
           <ArrowBackIcon />
         </IconButton>
         <Typography variant="h4" gutterBottom sx={{ mb: 0 }}>
@@ -172,97 +176,95 @@ const OrderView = ({ setSelectedView }) => {
             </TableRow>
           </TableHead>
           <TableBody>
-            {/* Map over filteredOrders instead of the mock data */}
-            {filteredOrders.map((order) => (
-              <TableRow key={order.id}>
-                <TableCell>{order.orderName || order.orderNumber}</TableCell>
-                <TableCell>{order.customerName || 'N/A'}</TableCell>
-                <TableCell>{order.orderDate}</TableCell>
-                <TableCell>${order.totalAmount?.toLocaleString()}</TableCell>
-                <TableCell>
-                  <Chip
-                    label={order.status}
-                    color={getStatusColor(order.status)}
-                    size="small"
-                  />
-                </TableCell>
-                <TableCell>
-                  <IconButton
-                    color="primary"
-                    onClick={() => handleViewDetails(order)}
-                  >
-                    <ViewIcon />
-                  </IconButton>
-                  {(order.status === 'Ready to Ship' || order.status === 'Processing') && (
-                    <IconButton
-                      color="success"
-                      onClick={() => handleShipOrder(order.id)}
-                    >
-                      <ShipIcon />
-                    </IconButton>
-                  )}
+            {loading ? (
+              <TableRow>
+                <TableCell colSpan={6} align="center">
+                  <CircularProgress />
                 </TableCell>
               </TableRow>
-            ))}
+            ) : error ? (
+              <TableRow>
+                <TableCell colSpan={6}>
+                  <Alert severity="error">{error}</Alert>
+                </TableCell>
+              </TableRow>
+            ) : orders.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={6} align="center">
+                  No orders found for your account.
+                </TableCell>
+              </TableRow>
+            ) : (
+              orders.map((order) => (
+                <TableRow key={order.order_id}>
+                  <TableCell>{order.order_no}</TableCell>
+                  <TableCell>{order.company_id || 'N/A'}</TableCell>
+                  <TableCell>{order.order_date}</TableCell>
+                  <TableCell>${order.order_total_amount?.toLocaleString() || 0}</TableCell>
+                  <TableCell>
+                    <Chip
+                      label={order.order_status}
+                      color={getStatusColor(order.order_status)}
+                      size="small"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <IconButton color="primary" onClick={() => handleViewDetails(order)}>
+                      <ViewIcon />
+                    </IconButton>
+                    {(order.order_status === 'Ready to Ship' || order.order_status === 'Processing') && (
+                      <IconButton color="success" onClick={() => handleShipOrder(order.order_id)}>
+                        <ShipIcon />
+                      </IconButton>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
           </TableBody>
         </Table>
       </TableContainer>
 
-      <Dialog
-        open={openDialog}
-        onClose={handleCloseDialog}
-        maxWidth="md"
-        fullWidth
-      >
+      <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="md" fullWidth>
         {selectedOrder && (
           <>
-            <DialogTitle>
-              Order Details - {selectedOrder.orderName}
-            </DialogTitle>
+            <DialogTitle>Order Details - {selectedOrder.order_no}</DialogTitle>
             <DialogContent>
               <DialogContentText component="div">
                 <Box sx={{ mb: 2 }}>
                   <Typography variant="subtitle1">
-                    Category: {selectedOrder.category}
+                    Customer: {selectedOrder.company_id || 'N/A'}
                   </Typography>
                   <Typography variant="subtitle1">
-                    Customer: {selectedOrder.customerName}
+                    Order Date: {selectedOrder.order_date}
                   </Typography>
                   <Typography variant="subtitle1">
-                    Order Date: {selectedOrder.orderDate}
-                  </Typography>
-                  <Typography variant="subtitle1">
-                    Quantity: {selectedOrder.quantity}
-                  </Typography>
-                  <Typography variant="subtitle1">
-                    Status: <Chip
-                      label={selectedOrder.status}
-                      color={getStatusColor(selectedOrder.status)}
-                      size="small"
-                      sx={{ ml: 1 }}
-                    />
-                  </Typography>
-                  <Typography variant="subtitle1">
-                    Company Expected Date: {selectedOrder.companyExpectedDate || 'Not specified'}
-                  </Typography>
-                  <Typography variant="subtitle1">
-                    Supplier Committed Date: {selectedOrder.supplierCommittedDate || 'Not specified'}
+                    Status: <Chip label={selectedOrder.order_status} color={getStatusColor(selectedOrder.order_status)} size="small" sx={{ ml: 1 }} />
                   </Typography>
                 </Box>
 
+                <Typography variant="h6" sx={{ mt: 2 }}>
+                  Items:
+                </Typography>
+                {selectedOrder.items?.map((item, idx) => (
+                  <Typography key={idx} variant="body2">
+                    {item.name} — Qty: {item.quantity}, Price: ${item.price}
+                  </Typography>
+                ))}
+
                 <Box sx={{ mt: 2 }}>
                   <Typography variant="h6">
-                    Total Amount: ${selectedOrder.totalAmount?.toLocaleString()}
+                    Total Amount: ${selectedOrder.order_total_amount?.toLocaleString() || 0}
                   </Typography>
                 </Box>
               </DialogContentText>
             </DialogContent>
             <DialogActions>
               <Button onClick={handleCloseDialog}>Close</Button>
-              {selectedOrder.status === 'Ready to Ship' && (
+              {selectedOrder.order_status === 'Ready to Ship' && (
                 <Button
-                  onClick={() => {
-                    handleShipOrder(selectedOrder.id);
+                  onClick={async () => {
+                    await handleShipOrder(selectedOrder.order_id);
                     handleCloseDialog();
                   }}
                   variant="contained"

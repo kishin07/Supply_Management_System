@@ -1,5 +1,6 @@
-import { createContext, useContext, useState } from 'react'
+import { createContext, useContext, useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import supabase from '../supabase'
 
 const AuthContext = createContext()
 
@@ -12,31 +13,183 @@ export function AuthProvider({ children }) {
   const [userRole, setUserRole] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  
+  // Check for existing session on component mount
+  useEffect(() => {
+    const checkSession = async () => {
+      setLoading(true)
+      
+      try {
+        // First check localStorage for user data
+        const storedUser = localStorage.getItem('user')
+        if (storedUser) {
+          const userData = JSON.parse(storedUser)
+          setCurrentUser(userData)
+          setUserRole(userData.role)
+        }
+        
+        // Then verify with Supabase session
+        const { data } = await supabase.auth.getSession()
+        
+        if (data?.session) {
+          const { user } = data.session
+          const userData = user.user_metadata || {}
+          
+          const sessionUser = {
+            id: user.id,
+            email: user.email,
+            name: userData.name || userData.display_name || 'User',
+            role: userData.role || 'consumer'
+          }
+          
+          // Update localStorage with fresh data
+          localStorage.setItem('user', JSON.stringify(sessionUser))
+          
+          setCurrentUser(sessionUser)
+          setUserRole(sessionUser.role || 'consumer')
+        } else if (storedUser) {
+          // If no active session but we have stored user, clear it
+          localStorage.removeItem('user')
+          setCurrentUser(null)
+          setUserRole(null)
+        }
+      } catch (err) {
+        console.error('Error checking session:', err)
+        // Clear potentially corrupted data
+        localStorage.removeItem('user')
+      } finally {
+        setLoading(false)
+      }
+    }
+    
+    checkSession()
+    
+    // Set up auth state change listener
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (session && session.user) {
+          const userData = session.user.user_metadata || {}
+          
+          const user = {
+            id: session.user.id,
+            email: session.user.email,
+            name: userData.name || userData.display_name || 'User',
+            role: userData.role || 'consumer'
+          }
+          
+          // Update localStorage with fresh data
+          localStorage.setItem('user', JSON.stringify(user))
+          
+          setCurrentUser(user)
+          setUserRole(userData.role || 'consumer')
+        } else {
+          // Clear user data from localStorage
+          localStorage.removeItem('user')
+          setCurrentUser(null)
+          setUserRole(null)
+        }
+      }
+    )
+    
+    return () => {
+      subscription?.unsubscribe()
+    }
+  }, [])
 
-  // Mock register function - in a real app, this would call an API
+  // Register function using Supabase
   const register = async (userData) => {
     setLoading(true)
     setError('')
     
     try {
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
-      // Simulate validation
+      // Validate passwords match
       if (userData.password !== userData.confirmPassword) {
         throw new Error('Passwords do not match')
       }
       
-      // In a real app, you would send the data to your backend API
-      console.log('Registering user:', userData)
-      
-      // Simulate successful registration
-      const user = {
-        id: 'user-' + Math.random().toString(36).substr(2, 9),
+      // Register user with Supabase
+      const { data, error: signUpError } = await supabase.auth.signUp({
         email: userData.email,
+        password: userData.password,
+        options: {
+          data: {
+            name: userData.name,
+            role: userData.role
+          }
+        }
+      })
+      
+      if (signUpError) throw signUpError
+      
+      // Update user profile to set display_name
+      if (data.user) {
+        const { error: updateError } = await supabase.auth.updateUser({
+          data: { display_name: userData.name }
+        })
+        
+        if (updateError) console.error('Error updating display name:', updateError)
+      }
+      
+      // Add user to the appropriate table based on role
+      if (data.user) {
+        const userId = data.user.id
+        let roleTableError = null
+        
+        // Add user to the appropriate table based on role
+        if (userData.role === 'supplier') {
+          const { error } = await supabase
+            .from('suppliers')
+            .insert([{ 
+              supplier_id: userId,
+              created_at: new Date(),
+              category: '',
+              contact: '',
+              rating: ''
+            }])
+            .select()
+          
+          roleTableError = error
+        } else if (userData.role === 'company') {
+          const { error } = await supabase
+            .from('company')
+            .insert([{ 
+              company_id: userId,
+              created_at: new Date()
+            }])
+            .select()
+          
+          roleTableError = error
+        } else if (userData.role === 'consumer') {
+          const { error } = await supabase
+            .from('consumers')
+            .insert([{ 
+              consumer_id: userId,
+              created_at: new Date()
+            }])
+            .select()
+          
+          roleTableError = error
+        }
+        
+        if (roleTableError) {
+          console.error(`Error adding user to ${userData.role} table:`, roleTableError)
+          // If adding to role table fails, we should throw an error to notify the user
+          throw new Error(`Failed to complete registration. Error adding user to ${userData.role} database.`)
+        }
+      }
+      
+      console.log('User registered successfully:', data)
+      
+      // Set user data in context
+      const user = {
+        id: data.user.id,
+        email: data.user.email,
         name: userData.name,
         role: userData.role
       }
+      
+      // Store user in localStorage for persistence
+      localStorage.setItem('user', JSON.stringify(user))
       
       setCurrentUser(user)
       setUserRole(userData.role)
@@ -50,47 +203,37 @@ export function AuthProvider({ children }) {
     }
   }
 
-  // Mock login function
+  // Login function using Supabase
   const login = async (email, password) => {
     setLoading(true)
     setError('')
     
     try {
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      // Sign in with Supabase
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password
+      })
       
-      // Predefined supplier accounts
-      const supplierAccounts = [
-        { id: 1, email: 'supplierA@example.com', password: 'password', name: 'Supplier A', role: 'supplier' },
-        { id: 2, email: 'supplierB@example.com', password: 'password', name: 'Supplier B', role: 'supplier' },
-        { id: 3, email: 'supplierC@example.com', password: 'password', name: 'Supplier C', role: 'supplier' },
-        { id: 4, email: 'supplierD@example.com', password: 'password', name: 'Supplier D', role: 'supplier' },
-        { id: 5, email: 'supplierE@example.com', password: 'password', name: 'Supplier E', role: 'supplier' }
-      ];
+      if (signInError) throw signInError
       
-      // Check if it's a supplier login
-      const supplierAccount = supplierAccounts.find(account => account.email === email && account.password === password);
+      // Get user metadata
+      const userData = data.user.user_metadata || {}
       
-      if (supplierAccount) {
-        setCurrentUser(supplierAccount)
-        setUserRole(supplierAccount.role)
-        return supplierAccount
+      const user = {
+        id: data.user.id,
+        email: data.user.email,
+        name: userData.name || userData.display_name || 'User',
+        role: userData.role || 'consumer'
       }
-      // In a real app, you would validate credentials with your backend
-      else if (email === 'test@example.com' && password === 'password') {
-        const user = {
-          id: 'user-123',
-          email: email,
-          name: 'Test User',
-          role: 'company' // Default role for test user
-        }
-        
-        setCurrentUser(user)
-        setUserRole(user.role)
-        return user
-      } else {
-        throw new Error('Invalid email or password')
-      }
+      
+      // Store user in localStorage for persistence
+      localStorage.setItem('user', JSON.stringify(user))
+      
+      setCurrentUser(user)
+      setUserRole(user.role)
+      
+      return user
     } catch (err) {
       setError(err.message || 'Failed to login')
       throw err
@@ -99,9 +242,20 @@ export function AuthProvider({ children }) {
     }
   }
 
-  const logout = () => {
-    setCurrentUser(null)
-    setUserRole(null)
+  const logout = async () => {
+    try {
+      const { error } = await supabase.auth.signOut()
+      if (error) throw error
+      
+      // Clear user data from localStorage
+      localStorage.removeItem('user')
+      
+      setCurrentUser(null)
+      setUserRole(null)
+    } catch (err) {
+      console.error('Error signing out:', err)
+      setError(err.message)
+    }
   }
 
   const value = {
