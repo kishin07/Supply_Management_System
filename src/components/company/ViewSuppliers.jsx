@@ -25,7 +25,8 @@ import {
   FormControl,
   InputLabel,
   Select,
-  MenuItem
+  MenuItem,
+  CircularProgress
 } from '@mui/material';
 import {
   Edit as EditIcon,
@@ -34,69 +35,35 @@ import {
   ArrowBack as ArrowBackIcon,
   Save as SaveIcon
 } from '@mui/icons-material';
+import supabase from '../../supabase';
 
 const ViewSuppliers = ({ dashboardData, setDashboardData, setCompanyView }) => {
-  // Load suppliers data from localStorage or use mock data
-  const [suppliers, setSuppliers] = useState(() => {
-    const savedSuppliers = localStorage.getItem('suppliers');
-    return savedSuppliers ? JSON.parse(savedSuppliers) : [
-    {
-      id: 1,
-      name: 'Supplier A',
-      contactPerson: 'John Smith',
-      email: 'john@suppliera.com',
-      phone: '(555) 123-4567',
-      category: 'Electronics',
-      rating: 4.5,
-      onTimeDelivery: 95,
-      status: 'Active'
-    },
-    {
-      id: 2,
-      name: 'Supplier B',
-      contactPerson: 'Jane Doe',
-      email: 'jane@supplierb.com',
-      phone: '(555) 987-6543',
-      category: 'Raw Materials',
-      rating: 4.0,
-      onTimeDelivery: 88,
-      status: 'Active'
-    },
-    {
-      id: 3,
-      name: 'Supplier C',
-      contactPerson: 'Robert Johnson',
-      email: 'robert@supplierc.com',
-      phone: '(555) 456-7890',
-      category: 'Office Supplies',
-      rating: 4.2,
-      onTimeDelivery: 92,
-      status: 'Active'
-    },
-    {
-      id: 4,
-      name: 'Supplier D',
-      contactPerson: 'Sarah Williams',
-      email: 'sarah@supplierd.com',
-      phone: '(555) 789-0123',
-      category: 'Furniture',
-      rating: 3.5,
-      onTimeDelivery: 78,
-      status: 'Inactive'
-    },
-    {
-      id: 5,
-      name: 'Supplier E',
-      contactPerson: 'Michael Brown',
-      email: 'michael@suppliere.com',
-      phone: '(555) 234-5678',
-      category: 'Electronics',
-      rating: 4.0,
-      onTimeDelivery: 85,
-      status: 'Active'
-    }
-  ];
-  });
+  const [suppliers, setSuppliers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  // Load suppliers data from Supabase
+  useEffect(() => {
+    const fetchSuppliers = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('suppliers')
+          .select('*, users(*)');
+
+        if (error) throw error;
+
+        setSuppliers(data);
+      } catch (error) {
+        console.error('Error fetching suppliers:', error);
+        setSnackbarMessage('Error loading suppliers');
+        setSnackbarSeverity('error');
+        setOpenSnackbar(true);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchSuppliers();
+  }, []);
 
   const [selectedSupplier, setSelectedSupplier] = useState(null);
   const [openDialog, setOpenDialog] = useState(false);
@@ -105,14 +72,13 @@ const ViewSuppliers = ({ dashboardData, setDashboardData, setCompanyView }) => {
     contactPerson: '',
     email: '',
     phone: '',
-    category: '',
-    rating: 0,
-    onTimeDelivery: 0,
-    status: 'Active'
+    category: ''
   });
   const [openSnackbar, setOpenSnackbar] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [snackbarSeverity, setSnackbarSeverity] = useState('success');
+  const [searchEmail, setSearchEmail] = useState('');
+  const [searchError, setSearchError] = useState('');
 
   // Update dashboard data when suppliers change
   useEffect(() => {
@@ -168,24 +134,136 @@ const ViewSuppliers = ({ dashboardData, setDashboardData, setCompanyView }) => {
     }
   }, [suppliers, dashboardData, setDashboardData]);
 
+  const [emailSearchDialog, setEmailSearchDialog] = useState(false);
+  const [emailSearchValue, setEmailSearchValue] = useState('');
+
   const handleOpenDialog = (supplier = null) => {
     if (supplier) {
       setSelectedSupplier(supplier);
       setFormData({ ...supplier });
+      setOpenDialog(true);
     } else {
-      setSelectedSupplier(null);
-      setFormData({
-        name: '',
-        contactPerson: '',
-        email: '',
-        phone: '',
-        category: '',
-        rating: 0,
-        onTimeDelivery: 80, // Default value
-        status: 'Active'
-      });
+      setEmailSearchDialog(true);
     }
-    setOpenDialog(true);
+  };
+
+  const handleEmailSearch = async () => {
+    // For the search dialog
+    if (emailSearchDialog) {
+      if (!emailSearchValue) {
+        setSearchError('Please enter an email to search');
+        return;
+      }
+
+      try {
+        // First check if user exists in users table
+        const { data: userData, error: userError } = await supabase
+          .from('users')
+          .select('uid, Email, name')
+          .eq('email', emailSearchValue)
+          .single();
+
+        if (userError) {
+          console.error('Error searching user:', userError);
+          setSearchError('Error searching for user');
+          return;
+        }
+
+        if (!userData) {
+          setSearchError('No user found with this email');
+          return;
+        }
+
+        // Then check if user is already a supplier
+        const { data: supplierData, error: supplierError } = await supabase
+          .from('suppliers')
+          .select('*')
+          .eq('supplier_id', userData.id)
+          .single();
+
+        if (supplierError && supplierError.code !== 'PGRST116') {
+          console.error('Error checking supplier:', supplierError);
+          setSearchError('Error checking supplier status');
+          return;
+        }
+
+        if (supplierData) {
+          setSelectedSupplier(supplierData);
+          setFormData({ ...supplierData });
+          setSnackbarMessage('Supplier with this email already exists');
+          setSnackbarSeverity('info');
+          setOpenSnackbar(true);
+        } else {
+          setSelectedSupplier(null);
+          setFormData({
+            name: userData.name || '',
+            contactPerson: userData.name || '',
+            email: userData.email,
+            user_id: userData.id,
+            phone: '',
+            category: '',
+            rating: 0,
+            onTimeDelivery: 80,
+            status: 'Active'
+          });
+        }
+
+        setEmailSearchDialog(false);
+        setOpenDialog(true);
+      } catch (error) {
+        console.error('Error searching supplier:', error);
+        setSearchError('Error searching for supplier');
+        setSnackbarMessage('Error searching for supplier');
+        setSnackbarSeverity('error');
+        setOpenSnackbar(true);
+      }
+    } 
+    // For the search bar
+    else {
+      if (!searchEmail) {
+        setSearchError('Please enter an email to search');
+        return;
+      }
+      try {
+        // First find the user with the given email
+        const { data: userData, error: userError } = await supabase
+          .from('users')
+          .select('id')
+          .eq('email', searchEmail)
+          .single();
+
+        if (userError) {
+          console.error('Error searching user:', userError);
+          setSearchError('Error searching for user');
+          return;
+        }
+
+        if (!userData) {
+          setSearchError('No user found with this email');
+          return;
+        }
+
+        // Then find the supplier associated with this user
+        const { data: suppliers, error: supplierError } = await supabase
+          .from('suppliers')
+          .select('*, users(*)')
+          .eq('user_id', userData.id);
+
+        if (supplierError) {
+          console.error('Error searching suppliers:', supplierError);
+          setSearchError('Error searching suppliers');
+          return;
+        }
+
+        if (suppliers.length === 0) {
+          setSearchError('No suppliers found with this email');
+        }
+        setSuppliers(suppliers);
+      } catch (error) {
+        console.error('Error searching suppliers:', error);
+        setSearchError('Error searching suppliers');
+      }
+    }
   };
 
   const handleCloseDialog = () => {
@@ -195,10 +273,15 @@ const ViewSuppliers = ({ dashboardData, setDashboardData, setCompanyView }) => {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
+    if (name === 'searchEmail') {
+      setSearchEmail(value);
+      setSearchError('');
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        [name]: value
+      }));
+    }
   };
 
   const handleRatingChange = (newValue) => {
@@ -208,27 +291,64 @@ const ViewSuppliers = ({ dashboardData, setDashboardData, setCompanyView }) => {
     }));
   };
 
-  const handleSubmit = () => {
-    if (selectedSupplier) {
-      // Update existing supplier
-      setSuppliers(prev =>
-        prev.map(supplier =>
-          supplier.id === selectedSupplier.id ? { ...supplier, ...formData } : supplier
-        )
-      );
-      setSnackbarMessage('Supplier updated successfully');
-    } else {
-      // Add new supplier
-      const newSupplier = {
-        id: suppliers.length > 0 ? Math.max(...suppliers.map(s => s.id)) + 1 : 1,
-        ...formData
-      };
-      setSuppliers(prev => [...prev, newSupplier]);
-      setSnackbarMessage('Supplier added successfully');
+  const handleSubmit = async () => {
+    try {
+      if (selectedSupplier) {
+        // Update existing supplier
+        const { error } = await supabase
+          .from('suppliers')
+          .update({
+            name: formData.name,
+            contact_person: formData.contactPerson,
+            phone: formData.phone,
+            category: formData.category,
+            status: formData.status
+          })
+          .eq('id', selectedSupplier.id);
+
+        if (error) throw error;
+
+        // Update local state
+        setSuppliers(prev =>
+          prev.map(supplier =>
+            supplier.id === selectedSupplier.id ? { ...supplier, ...formData } : supplier
+          )
+        );
+        setSnackbarMessage('Supplier updated successfully');
+      } else {
+        // Add new supplier
+        const { data: newSupplier, error } = await supabase
+          .from('suppliers')
+          .insert([
+            {
+              user_id: formData.user_id,
+              name: formData.name,
+              contact_person: formData.contactPerson,
+              phone: formData.phone,
+              category: formData.category,
+              rating: formData.rating || 0,
+              on_time_delivery: formData.onTimeDelivery || 80,
+              status: formData.status || 'Active'
+            }
+          ])
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        // Update local state
+        setSuppliers(prev => [...prev, newSupplier]);
+        setSnackbarMessage('Supplier added successfully');
+      }
+      setSnackbarSeverity('success');
+      setOpenSnackbar(true);
+      handleCloseDialog();
+    } catch (error) {
+      console.error('Error saving supplier:', error);
+      setSnackbarMessage('Error saving supplier');
+      setSnackbarSeverity('error');
+      setOpenSnackbar(true);
     }
-    setSnackbarSeverity('success');
-    setOpenSnackbar(true);
-    handleCloseDialog();
   };
 
   const handleDelete = (id) => {
@@ -252,7 +372,7 @@ const ViewSuppliers = ({ dashboardData, setDashboardData, setCompanyView }) => {
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 4 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
         <IconButton 
           color="primary" 
           sx={{ mr: 2 }}
@@ -260,19 +380,36 @@ const ViewSuppliers = ({ dashboardData, setDashboardData, setCompanyView }) => {
         >
           <ArrowBackIcon />
         </IconButton>
-        <Typography variant="h4" component="h1">
-          Supplier Management
+        <Typography variant="h4" gutterBottom sx={{ mb: 0 }}>
+          Manage Suppliers
         </Typography>
-      </Box>
-
-      <Box sx={{ mb: 4, display: 'flex', justifyContent: 'flex-end' }}>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={() => handleOpenDialog()}
-        >
-          Add New Supplier
-        </Button>
+        <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 2 }}>
+          <TextField
+            name="searchEmail"
+            label="Search by Email"
+            value={searchEmail}
+            onChange={handleInputChange}
+            error={!!searchError}
+            helperText={searchError}
+            size="small"
+            sx={{ width: 250 }}
+          />
+          <Button
+            variant="contained"
+            onClick={handleEmailSearch}
+            color="secondary"
+          >
+            Search
+          </Button>
+          <Button
+            variant="contained"
+            color="primary"
+            startIcon={<AddIcon />}
+            onClick={() => handleOpenDialog()}
+          >
+            Add Supplier
+          </Button>
+        </Box>
       </Box>
 
       <TableContainer component={Paper}>
@@ -328,6 +465,33 @@ const ViewSuppliers = ({ dashboardData, setDashboardData, setCompanyView }) => {
         </Table>
       </TableContainer>
 
+      {/* Email Search Dialog */}
+      <Dialog open={emailSearchDialog} onClose={() => setEmailSearchDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Search Supplier by Email</DialogTitle>
+        <DialogContent>
+          <Box sx={{ mt: 2 }}>
+            <TextField
+              fullWidth
+              label="Email Address"
+              value={emailSearchValue}
+              onChange={(e) => {
+                setEmailSearchValue(e.target.value);
+                setSearchError('');
+              }}
+              error={!!searchError}
+              helperText={searchError}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEmailSearchDialog(false)}>Cancel</Button>
+          <Button onClick={handleEmailSearch} variant="contained" color="primary">
+            Search & Continue
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Main Supplier Dialog */}
       <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="md" fullWidth>
         <DialogTitle>
           {selectedSupplier ? 'Edit Supplier' : 'Add New Supplier'}
@@ -377,42 +541,6 @@ const ViewSuppliers = ({ dashboardData, setDashboardData, setCompanyView }) => {
                 label="Category"
                 name="category"
                 value={formData.category}
-                onChange={handleInputChange}
-              />
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <FormControl fullWidth>
-                <InputLabel>Status</InputLabel>
-                <Select
-                  name="status"
-                  value={formData.status}
-                  label="Status"
-                  onChange={handleInputChange}
-                >
-                  <MenuItem value="Active">Active</MenuItem>
-                  <MenuItem value="Inactive">Inactive</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <Box>
-                <Typography component="legend">Rating</Typography>
-                <Rating
-                  name="rating"
-                  value={formData.rating}
-                  precision={0.5}
-                  onChange={(event, newValue) => handleRatingChange(newValue)}
-                />
-              </Box>
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                label="On-time Delivery %"
-                name="onTimeDelivery"
-                type="number"
-                InputProps={{ inputProps: { min: 0, max: 100 } }}
-                value={formData.onTimeDelivery}
                 onChange={handleInputChange}
               />
             </Grid>

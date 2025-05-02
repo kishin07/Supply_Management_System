@@ -24,7 +24,8 @@ import {
   InputLabel,
   Grid,
   Snackbar,
-  Alert
+  Alert,
+  CircularProgress
 } from '@mui/material';
 import {
   Edit as EditIcon,
@@ -33,66 +34,63 @@ import {
   ArrowBack as ArrowBackIcon,
   Save as SaveIcon
 } from '@mui/icons-material';
+import supabase from '../../supabase';
 
 const ManageOrders = ({ dashboardData, setDashboardData, setCompanyView }) => {
-  // Load suppliers data from localStorage
-  const [suppliers, setSuppliers] = useState(() => {
-    const savedSuppliers = localStorage.getItem('suppliers');
-    return savedSuppliers ? JSON.parse(savedSuppliers) : [];
-  });
-  
-  // Load orders data from localStorage or use mock data
-  const [orders, setOrders] = useState(() => {
-    const savedOrders = localStorage.getItem('orders');
-    return savedOrders ? JSON.parse(savedOrders) : [
-    {
-      id: 1,
-      orderNumber: 'ORD-2023-001',
-      supplier: 'Supplier A',
-      items: [
-        { name: 'Raw Material A', quantity: 50, price: 20 },
-        { name: 'Component C', quantity: 25, price: 40 }
-      ],
-      orderDate: '2023-07-15',
-      status: 'Pending',
-      totalAmount: 2500
-    },
-    {
-      id: 2,
-      orderNumber: 'ORD-2023-002',
-      supplier: 'Supplier B',
-      items: [
-        { name: 'Product B', quantity: 30, price: 60 }
-      ],
-      orderDate: '2023-07-16',
-      status: 'Processing',
-      totalAmount: 1800
-    },
-    {
-      id: 3,
-      orderNumber: 'ORD-2023-003',
-      supplier: 'Supplier C',
-      items: [
-        { name: 'Raw Material A', quantity: 100, price: 20 },
-        { name: 'Product B', quantity: 20, price: 60 }
-      ],
-      orderDate: '2023-07-17',
-      status: 'Shipped',
-      totalAmount: 3200
-    },
-    {
-      id: 4,
-      orderNumber: 'ORD-2023-004',
-      supplier: 'Supplier D',
-      items: [
-        { name: 'Component X', quantity: 40, price: 30 }
-      ],
-      orderDate: '2023-07-18',
-      status: 'Delivered',
-      totalAmount: 1200
-    }
-  ];
-  });
+  const [suppliers, setSuppliers] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch orders and suppliers from Supabase
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        // Fetch orders
+        const { data: ordersData, error: ordersError } = await supabase
+          .from('orders')
+          .select('*')
+          .order('order_date', { ascending: false });
+
+        if (ordersError) throw ordersError;
+
+        // Fetch order items for each order
+        const ordersWithItems = await Promise.all(
+          ordersData.map(async (order) => {
+            const { data: itemsData, error: itemsError } = await supabase
+              .from('order_items')
+              .select('*')
+              .eq('order_id', order.order_id);
+
+            if (itemsError) throw itemsError;
+
+            return {
+              ...order,
+              items: itemsData || []
+            };
+          })
+        );
+
+        // Fetch suppliers
+        const { data: suppliersData, error: suppliersError } = await supabase
+          .from('suppliers')
+          .select('*');
+
+        if (suppliersError) throw suppliersError;
+
+        setOrders(ordersWithItems);
+        setSuppliers(suppliersData);
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        setSnackbarMessage('Error loading data');
+        setSnackbarSeverity('error');
+        setOpenSnackbar(true);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
 
 
   const [selectedOrder, setSelectedOrder] = useState(null);
@@ -225,45 +223,161 @@ const ManageOrders = ({ dashboardData, setDashboardData, setCompanyView }) => {
     }));
   };
 
-  // Save orders to localStorage whenever they change
+  // Update dashboard data whenever orders change
   useEffect(() => {
-    localStorage.setItem('orders', JSON.stringify(orders));
-  }, [orders]);
-
-  const handleSubmit = () => {
-    // Validate using supplierId instead of supplier
-    if (formData.supplierId && formData.items.length > 0) {
-      if (selectedOrder) {
-        // Update existing order, ensuring supplierId and supplierName are included
-        setOrders(prev =>
-          prev.map(order =>
-            order.id === selectedOrder.id ? { ...formData, id: order.id } : order
-          )
-        );
-        setSnackbarMessage('Order updated successfully');
-      } else {
-        // Add new order, formData already contains supplierId and supplierName
-        const newOrder = {
-          id: orders.length > 0 ? Math.max(...orders.map(o => o.id)) + 1 : 1,
-          ...formData 
-        };
-        setOrders(prev => [...prev, newOrder]);
-        setSnackbarMessage('Order added successfully');
-      }
-      setSnackbarSeverity('success');
-      setOpenSnackbar(true);
-      handleCloseDialog();
-    } else {
-      setSnackbarMessage('Please fill all required fields');
-      setSnackbarSeverity('error');
-      setOpenSnackbar(true);
+    if (orders.length > 0) {
+      const pendingCount = orders.filter(order => order.order_status === 'Pending').length;
+      const processingCount = orders.filter(order => order.order_status === 'Processing').length;
+      const shippedCount = orders.filter(order => order.order_status === 'Shipped').length;
+      const deliveredCount = orders.filter(order => order.order_status === 'Delivered').length;
+      
+      setDashboardData(prev => ({
+        ...prev,
+        company: {
+          ...prev.company,
+          totalOrders: orders.length,
+          pendingShipments: pendingCount + processingCount,
+          orderDistribution: {
+            labels: ['Pending', 'Processing', 'Shipped', 'Delivered'],
+            datasets: [{
+              data: [pendingCount, processingCount, shippedCount, deliveredCount],
+              backgroundColor: ['#FF6384', '#36A2EB', '#FFCE56', '#4CAF50'],
+              hoverBackgroundColor: ['#FF6384', '#36A2EB', '#FFCE56', '#4CAF50']
+            }]
+          }
+        }
+      }));
     }
+  }, [orders, setDashboardData]);
+
+  const handleSubmit = async () => {
+    try {
+      if (formData.supplierId && formData.items.length > 0) {
+        const orderData = {
+          order_no: formData.orderNumber,
+          company_id: dashboardData.company.id,
+          order_supplier: formData.supplierId,
+          order_date: formData.orderDate,
+          order_total_amount: formData.totalAmount,
+          order_status: formData.status
+        };
+
+        if (selectedOrder) {
+          // Update existing order
+          const { error: orderError } = await supabase
+            .from('orders')
+            .update(orderData)
+            .eq('order_id', selectedOrder.order_id);
+
+          if (orderError) throw orderError;
+
+          // Delete existing items
+          const { error: deleteError } = await supabase
+            .from('order_items')
+            .delete()
+            .eq('order_id', selectedOrder.order_id);
+
+          if (deleteError) throw deleteError;
+
+          // Insert new items
+          const { error: itemsError } = await supabase
+            .from('order_items')
+            .insert(
+              formData.items.map(item => ({
+                order_id: selectedOrder.order_id,
+                item_name: item.name,
+                quantity: item.quantity,
+                price: item.price
+              }))
+            );
+
+          if (itemsError) throw itemsError;
+
+          setSnackbarMessage('Order updated successfully');
+        } else {
+          // Create new order
+          const { data: newOrder, error: orderError } = await supabase
+            .from('orders')
+            .insert([orderData])
+            .select()
+            .single();
+
+          if (orderError) throw orderError;
+
+          // Insert order items
+          const { error: itemsError } = await supabase
+            .from('order_items')
+            .insert(
+              formData.items.map(item => ({
+                order_id: newOrder.order_id,
+                item_name: item.name,
+                quantity: item.quantity,
+                price: item.price
+              }))
+            );
+
+          if (itemsError) throw itemsError;
+
+          setSnackbarMessage('Order created successfully');
+        }
+
+        setSnackbarSeverity('success');
+        handleCloseDialog();
+
+        // Refresh orders
+        const { data: updatedOrders, error: fetchError } = await supabase
+          .from('orders')
+          .select('*')
+          .order('order_date', { ascending: false });
+
+        if (fetchError) throw fetchError;
+
+        const ordersWithItems = await Promise.all(
+          updatedOrders.map(async (order) => {
+            const { data: itemsData, error: itemsError } = await supabase
+              .from('order_items')
+              .select('*')
+              .eq('order_id', order.order_id);
+
+            if (itemsError) throw itemsError;
+
+            return {
+              ...order,
+              items: itemsData || []
+            };
+          })
+        );
+
+        setOrders(ordersWithItems);
+      } else {
+        setSnackbarMessage('Please fill all required fields');
+        setSnackbarSeverity('error');
+      }
+    } catch (error) {
+      console.error('Error saving order:', error);
+      setSnackbarMessage('Error saving order');
+      setSnackbarSeverity('error');
+    }
+    setOpenSnackbar(true);
   };
 
-  const handleDelete = (id) => {
-    setOrders(prev => prev.filter(order => order.id !== id));
-    setSnackbarMessage('Order deleted successfully');
-    setSnackbarSeverity('success');
+  const handleDelete = async (orderId) => {
+    try {
+      const { error: deleteError } = await supabase
+        .from('orders')
+        .delete()
+        .eq('order_id', orderId);
+
+      if (deleteError) throw deleteError;
+
+      setOrders(prev => prev.filter(order => order.order_id !== orderId));
+      setSnackbarMessage('Order deleted successfully');
+      setSnackbarSeverity('success');
+    } catch (error) {
+      console.error('Error deleting order:', error);
+      setSnackbarMessage('Error deleting order');
+      setSnackbarSeverity('error');
+    }
     setOpenSnackbar(true);
   };
 
@@ -310,6 +424,11 @@ const ManageOrders = ({ dashboardData, setDashboardData, setCompanyView }) => {
         </Button>
       </Box>
 
+      {loading ? (
+        <Box display="flex" justifyContent="center" my={4}>
+          <CircularProgress />
+        </Box>
+      ) : (
       <TableContainer component={Paper}>
         <Table>
           <TableHead>
@@ -357,6 +476,7 @@ const ManageOrders = ({ dashboardData, setDashboardData, setCompanyView }) => {
           </TableBody>
         </Table>
       </TableContainer>
+      )}
 
       {/* Order Form Dialog */}
       <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="md" fullWidth>
