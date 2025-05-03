@@ -21,7 +21,7 @@ const OrderHistory = ({ dashboardData, setDashboardData }) => {
   const orders = [
     {
       id: 1,
-      orderNumber: 'ORD-2023-001',
+      orderNumber: '16990000001234',
       date: '2023-06-15',
       items: [
         { name: 'Laptop', quantity: 1, price: 1200 },
@@ -32,7 +32,7 @@ const OrderHistory = ({ dashboardData, setDashboardData }) => {
     },
     {
       id: 2,
-      orderNumber: 'ORD-2023-002',
+      orderNumber: '16995000002345',
       date: '2023-07-20',
       items: [
         { name: 'Office Chair', quantity: 2, price: 300 },
@@ -43,7 +43,7 @@ const OrderHistory = ({ dashboardData, setDashboardData }) => {
     },
     {
       id: 3,
-      orderNumber: 'ORD-2023-003',
+      orderNumber: '17000000003456',
       date: '2023-08-05',
       items: [
         { name: 'Printer', quantity: 1, price: 350 }
@@ -53,7 +53,7 @@ const OrderHistory = ({ dashboardData, setDashboardData }) => {
     },
     {
       id: 4,
-      orderNumber: 'ORD-2023-004',
+      orderNumber: '17005000004567',
       date: '2023-09-10',
       items: [
         { name: 'Headphones', quantity: 1, price: 120 },
@@ -64,7 +64,7 @@ const OrderHistory = ({ dashboardData, setDashboardData }) => {
     },
     {
       id: 5,
-      orderNumber: 'ORD-2023-005',
+      orderNumber: '17010000005678',
       date: '2023-10-15',
       items: [
         { name: 'Monitor', quantity: 1, price: 250 }

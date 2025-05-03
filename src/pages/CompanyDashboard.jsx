@@ -31,6 +31,7 @@ import VendorPerformance from '../components/company/VendorPerformance'
 import OrderRawMaterials from '../components/company/OrderRawMaterials'
 import ManageOrders from '../components/company/ManageOrders'
 import ViewSuppliers from '../components/company/ViewSuppliers'
+import ViewOrders from '../components/company/ViewOrders'
 import CompanyBiddingSystem from '../components/company/BiddingSystem'
 
 // Register ChartJS components
@@ -171,6 +172,10 @@ function CompanyDashboard() {
     return <ManageOrders dashboardData={dashboardData} setDashboardData={setDashboardData} setCompanyView={setCompanyView} />
   }
   
+  if (companyView === 'viewOrders') {
+    return <ViewOrders setCompanyView={setCompanyView} />
+  }
+  
   if (companyView === 'viewSuppliers') {
     return <ViewSuppliers dashboardData={dashboardData} setDashboardData={setDashboardData} setCompanyView={setCompanyView} />
   }
@@ -272,7 +277,7 @@ function CompanyDashboard() {
       {/* Summary Cards */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
         <Grid item xs={12} sm={6} md={3}>
-          <Card sx={{ cursor: 'pointer' }} onClick={() => setCompanyView('manageOrders')}>
+          <Card sx={{ cursor: 'pointer' }} onClick={() => setCompanyView('viewOrders')}>
             <CardContent>
               <OrdersIcon color="primary" sx={{ fontSize: 40 }} />
               <Typography variant="h5" component="div">
@@ -286,7 +291,7 @@ function CompanyDashboard() {
         </Grid>
         
         <Grid item xs={12} sm={6} md={3}>
-          <Card sx={{ cursor: 'pointer' }} onClick={() => setCompanyView('manageOrders')}>
+          <Card sx={{ cursor: 'pointer' }} onClick={() => setCompanyView('viewOrders')}>
             <CardContent>
               <ShippingIcon color="secondary" sx={{ fontSize: 40 }} />
               <Typography variant="h5" component="div">
@@ -369,9 +374,9 @@ function CompanyDashboard() {
         <Button 
           variant="contained" 
           startIcon={<OrdersIcon />} 
-          onClick={() => setCompanyView('manageOrders')}
+          onClick={() => setCompanyView('viewOrders')}
         >
-          Manage Orders
+          View Orders
         </Button>
         <Button 
           variant="contained" 

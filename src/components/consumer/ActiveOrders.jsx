@@ -24,7 +24,7 @@ const ActiveOrders = ({ dashboardData, setDashboardData }) => {
   const activeOrders = [
     {
       id: 101,
-      orderNumber: 'ORD-2023-101',
+      orderNumber: '17020000001234',
       date: '2023-10-25',
       items: [
         { name: 'Wireless Earbuds', quantity: 1, price: 89 },
@@ -36,7 +36,7 @@ const ActiveOrders = ({ dashboardData, setDashboardData }) => {
     },
     {
       id: 102,
-      orderNumber: 'ORD-2023-102',
+      orderNumber: '17025000002345',
       date: '2023-10-28',
       items: [
         { name: 'External Hard Drive', quantity: 1, price: 120 }
@@ -48,7 +48,7 @@ const ActiveOrders = ({ dashboardData, setDashboardData }) => {
     },
     {
       id: 103,
-      orderNumber: 'ORD-2023-103',
+      orderNumber: '17030000003456',
       date: '2023-10-30',
       items: [
         { name: 'Wireless Mouse', quantity: 1, price: 45 },

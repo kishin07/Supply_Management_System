@@ -246,8 +246,10 @@ const Checkout = ({ setConsumerView }) => {
   
   // Place order
   const placeOrder = () => {
-    // Generate a random order number
-    const newOrderNumber = `ORD-${Date.now().toString().slice(-6)}`;
+    // Generate a numeric-only order number
+    const timestamp = Date.now().toString();
+    const randomDigits = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+    const newOrderNumber = timestamp + randomDigits;
     setOrderNumber(newOrderNumber);
     
     // Create order object

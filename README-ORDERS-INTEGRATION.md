@@ -1,17 +1,17 @@
-# Orders and Order Items Integration
+# Company Orders and Order Items Integration
 
 ## Overview
-This document explains the integration between the `orders` and `order_items` tables in Supabase for the Supply Management System. The integration allows companies to create orders with multiple items and suppliers to view and manage these orders.
+This document explains the integration between the `company_orders` and `order_items` tables in Supabase for the Supply Management System. The integration allows companies to create orders with multiple items and suppliers to view and manage these orders.
 
 ## Database Structure
 
-### Orders Table
-The `orders` table stores the main order information:
+### Company Orders Table
+The `company_orders` table stores the main order information:
 
 | Column Name | Type | Description |
 |-------------|------|-------------|
 | order_id | uuid | Primary key, automatically generated |
-| order_no | string | Order number (e.g., ORD-2023-001) |
+| order_no | string | Order number (numeric only, e.g., 16990000001234) |
 | company_id | string | ID of the company placing the order |
 | order_supplier | uuid | ID of the supplier receiving the order |
 | order_date | date | Date when the order was placed |
@@ -24,7 +24,7 @@ The `order_items` table stores the individual items within each order:
 | Column Name | Type | Description |
 |-------------|------|-------------|
 | item_id | uuid | Primary key, automatically generated |
-| order_id | uuid | Foreign key referencing orders.order_id |
+| order_id | uuid | Foreign key referencing company_orders.order_id |
 | item_name | string | Name of the item |
 | quantity | number | Quantity ordered |
 | price | number | Price per unit |
@@ -46,7 +46,7 @@ The `order_items` table stores the individual items within each order:
 
 1. **Creating an Order**:
    - When a company creates a new order, the system:
-     - First creates a record in the `orders` table
+     - First creates a record in the `company_orders` table
      - Then creates records in the `order_items` table for each item, linking them to the order
 
 2. **Viewing Orders**:
@@ -55,13 +55,13 @@ The `order_items` table stores the individual items within each order:
 
 3. **Updating Orders**:
    - When an order is updated, the system:
-     - Updates the record in the `orders` table
+     - Updates the record in the `company_orders` table
      - Deletes existing items and creates new ones in the `order_items` table
 
 4. **Deleting Orders**:
    - When an order is deleted, the system:
      - First deletes all related items from the `order_items` table
-     - Then deletes the record from the `orders` table
+     - Then deletes the record from the `company_orders` table
 
 ## Testing
 
@@ -72,7 +72,7 @@ src/utils/testOrdersConnection.js
 ```
 
 This script tests:
-1. Creating a test order
+1. Creating a test company order
 2. Adding items to the order
 3. Fetching the order with its items
 4. Cleaning up test data
@@ -84,8 +84,8 @@ This script tests:
 If the tables don't exist in your Supabase project, create them with the following SQL:
 
 ```sql
--- Create orders table
-CREATE TABLE orders (
+-- Create company_orders table
+CREATE TABLE company_orders (
   order_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   order_no TEXT NOT NULL,
   company_id TEXT NOT NULL,
@@ -98,7 +98,7 @@ CREATE TABLE orders (
 -- Create order_items table
 CREATE TABLE order_items (
   item_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  order_id UUID REFERENCES orders(order_id) ON DELETE CASCADE,
+  order_id UUID REFERENCES company_orders(order_id) ON DELETE CASCADE,
   item_name TEXT NOT NULL,
   quantity INTEGER NOT NULL,
   price NUMERIC NOT NULL
@@ -113,16 +113,16 @@ CREATE INDEX idx_order_items_order_id ON order_items(order_id);
 For better security, consider adding Row Level Security policies:
 
 ```sql
--- Enable RLS on orders table
-ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
+-- Enable RLS on company_orders table
+ALTER TABLE company_orders ENABLE ROW LEVEL SECURITY;
 
 -- Policy for companies to see only their orders
-CREATE POLICY company_orders_policy ON orders 
+CREATE POLICY company_orders_policy ON company_orders 
   FOR ALL 
   USING (company_id = auth.uid());
 
 -- Policy for suppliers to see only orders assigned to them
-CREATE POLICY supplier_orders_policy ON orders 
+CREATE POLICY supplier_orders_policy ON company_orders 
   FOR ALL 
   USING (order_supplier = auth.uid());
 
@@ -132,7 +132,7 @@ ALTER TABLE order_items ENABLE ROW LEVEL SECURITY;
 -- Policy for order_items based on order access
 CREATE POLICY order_items_policy ON order_items 
   FOR ALL 
-  USING (order_id IN (SELECT order_id FROM orders WHERE company_id = auth.uid() OR order_supplier = auth.uid()));
+  USING (order_id IN (SELECT order_id FROM company_orders WHERE company_id = auth.uid() OR order_supplier = auth.uid()));
 ```
 
 ## Troubleshooting

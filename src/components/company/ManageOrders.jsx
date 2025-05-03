@@ -35,11 +35,13 @@ import {
   Save as SaveIcon
 } from '@mui/icons-material';
 import supabase from '../../supabase';
+import AddOrder from './AddOrder';
 
 const ManageOrders = ({ dashboardData, setDashboardData, setCompanyView }) => {
   const [suppliers, setSuppliers] = useState([]);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [orderView, setOrderView] = useState('list'); // 'list' or 'add'
 
   // Fetch orders and suppliers from Supabase
   useEffect(() => {
@@ -47,7 +49,7 @@ const ManageOrders = ({ dashboardData, setDashboardData, setCompanyView }) => {
       try {
         // Fetch orders
         const { data: ordersData, error: ordersError } = await supabase
-          .from('orders')
+          .from('company_orders')
           .select('*')
           .order('order_date', { ascending: false });
 
@@ -113,10 +115,10 @@ const ManageOrders = ({ dashboardData, setDashboardData, setCompanyView }) => {
   useEffect(() => {
     if (dashboardData && setDashboardData) {
       // Calculate new values based on orders
-      const pendingCount = orders.filter(order => order.status === 'Pending').length;
-      const processingCount = orders.filter(order => order.status === 'Processing').length;
-      const shippedCount = orders.filter(order => order.status === 'Shipped').length;
-      const deliveredCount = orders.filter(order => order.status === 'Delivered').length;
+      const pendingCount = orders.filter(order => order.order_status === 'Pending').length;
+      const processingCount = orders.filter(order => order.order_status === 'Processing').length;
+      const shippedCount = orders.filter(order => order.order_status === 'Shipped').length;
+      const deliveredCount = orders.filter(order => order.order_status === 'Delivered').length;
       
       // Update dashboard data
       setDashboardData(prev => ({
@@ -138,30 +140,17 @@ const ManageOrders = ({ dashboardData, setDashboardData, setCompanyView }) => {
     }
   }, [orders, dashboardData, setDashboardData]);
 
-  const handleOpenDialog = (order = null) => {
-    if (order) {
-      setSelectedOrder(order);
-      // Find supplier name from ID if not stored directly (assuming suppliers state has {id, name})
-      // Also handle cases where order might still have 'supplier' instead of 'supplierId'
-      const supplier = suppliers.find(s => s.id === order.supplierId);
-      setFormData({
-        ...order,
-        supplierId: order.supplierId || '', // Use existing supplierId or default
-        supplierName: supplier ? supplier.name : order.supplierName || order.supplier || '', // Use found name, existing name, or legacy name
-        items: [...order.items] // Create a deep copy of items array
-      });
-    } else {
-      setSelectedOrder(null);
-      setFormData({
-        orderNumber: `ORD-${new Date().getFullYear()}-${String(orders.length + 1).padStart(3, '0')}`,
-        supplierId: '', // Changed from supplier
-        supplierName: '', // Added
-        items: [],
-        orderDate: new Date().toISOString().split('T')[0],
-        status: 'Pending',
-        totalAmount: 0
-      });
-    }
+  const handleOpenDialog = (order) => {
+    setSelectedOrder(order);
+    // Find supplier name from ID if not stored directly (assuming suppliers state has {id, name})
+    // Also handle cases where order might still have 'supplier' instead of 'supplierId'
+    const supplier = suppliers.find(s => s.id === order.supplierId);
+    setFormData({
+      ...order,
+      supplierId: order.supplierId || '', // Use existing supplierId or default
+      supplierName: supplier ? supplier.name : order.supplierName || order.supplier || '', // Use found name, existing name, or legacy name
+      items: [...order.items] // Create a deep copy of items array
+    });
     setOpenDialog(true);
   };
 
@@ -223,32 +212,7 @@ const ManageOrders = ({ dashboardData, setDashboardData, setCompanyView }) => {
     }));
   };
 
-  // Update dashboard data whenever orders change
-  useEffect(() => {
-    if (orders.length > 0) {
-      const pendingCount = orders.filter(order => order.order_status === 'Pending').length;
-      const processingCount = orders.filter(order => order.order_status === 'Processing').length;
-      const shippedCount = orders.filter(order => order.order_status === 'Shipped').length;
-      const deliveredCount = orders.filter(order => order.order_status === 'Delivered').length;
-      
-      setDashboardData(prev => ({
-        ...prev,
-        company: {
-          ...prev.company,
-          totalOrders: orders.length,
-          pendingShipments: pendingCount + processingCount,
-          orderDistribution: {
-            labels: ['Pending', 'Processing', 'Shipped', 'Delivered'],
-            datasets: [{
-              data: [pendingCount, processingCount, shippedCount, deliveredCount],
-              backgroundColor: ['#FF6384', '#36A2EB', '#FFCE56', '#4CAF50'],
-              hoverBackgroundColor: ['#FF6384', '#36A2EB', '#FFCE56', '#4CAF50']
-            }]
-          }
-        }
-      }));
-    }
-  }, [orders, setDashboardData]);
+  // This useEffect is redundant and can be removed as we already have a similar one above
 
   const handleSubmit = async () => {
     try {
@@ -262,71 +226,43 @@ const ManageOrders = ({ dashboardData, setDashboardData, setCompanyView }) => {
           order_status: formData.status
         };
 
-        if (selectedOrder) {
-          // Update existing order
-          const { error: orderError } = await supabase
-            .from('orders')
-            .update(orderData)
-            .eq('order_id', selectedOrder.order_id);
+        // Update existing order
+        const { error: orderError } = await supabase
+          .from('company_orders')
+          .update(orderData)
+          .eq('order_id', selectedOrder.order_id);
 
-          if (orderError) throw orderError;
+        if (orderError) throw orderError;
 
-          // Delete existing items
-          const { error: deleteError } = await supabase
-            .from('order_items')
-            .delete()
-            .eq('order_id', selectedOrder.order_id);
+        // Delete existing items
+        const { error: deleteError } = await supabase
+          .from('order_items')
+          .delete()
+          .eq('order_id', selectedOrder.order_id);
 
-          if (deleteError) throw deleteError;
+        if (deleteError) throw deleteError;
 
-          // Insert new items
-          const { error: itemsError } = await supabase
-            .from('order_items')
-            .insert(
-              formData.items.map(item => ({
-                order_id: selectedOrder.order_id,
-                item_name: item.name,
-                quantity: item.quantity,
-                price: item.price
-              }))
-            );
+        // Insert new items
+        const { error: itemsError } = await supabase
+          .from('order_items')
+          .insert(
+            formData.items.map(item => ({
+              order_id: selectedOrder.order_id,
+              item_name: item.name,
+              quantity: item.quantity,
+              price: item.price
+            }))
+          );
 
-          if (itemsError) throw itemsError;
+        if (itemsError) throw itemsError;
 
-          setSnackbarMessage('Order updated successfully');
-        } else {
-          // Create new order
-          const { data: newOrder, error: orderError } = await supabase
-            .from('orders')
-            .insert([orderData])
-            .select()
-            .single();
-
-          if (orderError) throw orderError;
-
-          // Insert order items
-          const { error: itemsError } = await supabase
-            .from('order_items')
-            .insert(
-              formData.items.map(item => ({
-                order_id: newOrder.order_id,
-                item_name: item.name,
-                quantity: item.quantity,
-                price: item.price
-              }))
-            );
-
-          if (itemsError) throw itemsError;
-
-          setSnackbarMessage('Order created successfully');
-        }
-
+        setSnackbarMessage('Order updated successfully');
         setSnackbarSeverity('success');
         handleCloseDialog();
 
         // Refresh orders
         const { data: updatedOrders, error: fetchError } = await supabase
-          .from('orders')
+          .from('company_orders')
           .select('*')
           .order('order_date', { ascending: false });
 
@@ -364,7 +300,7 @@ const ManageOrders = ({ dashboardData, setDashboardData, setCompanyView }) => {
   const handleDelete = async (orderId) => {
     try {
       const { error: deleteError } = await supabase
-        .from('orders')
+        .from('company_orders')
         .delete()
         .eq('order_id', orderId);
 
@@ -400,6 +336,11 @@ const ManageOrders = ({ dashboardData, setDashboardData, setCompanyView }) => {
     setOpenSnackbar(false);
   };
 
+  // If in add order view, render the AddOrder component
+  if (orderView === 'add') {
+    return <AddOrder setOrderView={setOrderView} dashboardData={dashboardData} />;
+  }
+
   return (
     <Container maxWidth="lg">
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
@@ -418,7 +359,7 @@ const ManageOrders = ({ dashboardData, setDashboardData, setCompanyView }) => {
           color="primary"
           startIcon={<AddIcon />}
           sx={{ ml: 'auto' }}
-          onClick={() => handleOpenDialog()}
+          onClick={() => setOrderView('add')}
         >
           New Order
         </Button>
@@ -443,18 +384,18 @@ const ManageOrders = ({ dashboardData, setDashboardData, setCompanyView }) => {
           </TableHead>
           <TableBody>
             {orders.map((order) => (
-              <TableRow key={order.id}>
-                <TableCell>{order.orderNumber}</TableCell>
-                <TableCell>{order.supplierName || order.supplier}</TableCell> {/* Display supplierName, fallback to supplier for older data */}
-                <TableCell>{order.orderDate}</TableCell>
+              <TableRow key={order.order_id}>
+                <TableCell>{order.order_no}</TableCell>
+                <TableCell>{order.supplierName || order.order_supplier}</TableCell>
+                <TableCell>{new Date(order.order_date).toLocaleDateString()}</TableCell>
                 <TableCell>
                   <Chip 
-                    label={order.status} 
-                    color={getStatusColor(order.status)} 
+                    label={order.order_status} 
+                    color={getStatusColor(order.order_status)} 
                     size="small" 
                   />
                 </TableCell>
-                <TableCell align="right">${order.totalAmount.toLocaleString()}</TableCell>
+                <TableCell align="right">${(order.order_total || 0).toLocaleString()}</TableCell>
                 <TableCell align="center">
                   <IconButton 
                     color="primary" 
@@ -466,7 +407,7 @@ const ManageOrders = ({ dashboardData, setDashboardData, setCompanyView }) => {
                   <IconButton 
                     color="error" 
                     size="small"
-                    onClick={() => handleDelete(order.id)}
+                    onClick={() => handleDelete(order.order_id)}
                   >
                     <DeleteIcon />
                   </IconButton>
@@ -481,7 +422,7 @@ const ManageOrders = ({ dashboardData, setDashboardData, setCompanyView }) => {
       {/* Order Form Dialog */}
       <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="md" fullWidth>
         <DialogTitle>
-          {selectedOrder ? 'Edit Order' : 'New Order'}
+          Edit Order
         </DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 1 }}>

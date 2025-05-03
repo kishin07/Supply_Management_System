@@ -46,7 +46,7 @@ const OrderView = ({ setSelectedView }) => {
 
       try {
         const { data, error } = await supabase
-          .from('orders')
+          .from('company_orders')
           .select('*')
           .eq('order_supplier', currentUser.id);
 
@@ -100,7 +100,7 @@ const OrderView = ({ setSelectedView }) => {
   const updateOrderStatus = async (orderId, newStatus) => {
     try {
       const { error } = await supabase
-        .from('orders')
+        .from('company_orders')
         .update({ order_status: newStatus })
         .eq('order_id', orderId);
 

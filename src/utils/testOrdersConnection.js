@@ -1,18 +1,18 @@
 import supabase from '../supabase';
 
-// This script tests the connection between orders and order_items tables
+// This script tests the connection between company_orders and order_items tables
 
 async function testOrdersConnection() {
-  console.log('Testing orders and order_items connection...');
+  console.log('Testing company_orders and order_items connection...');
   
   try {
     // Test 1: Create a test order
     console.log('Creating test order...');
     const { data: orderData, error: orderError } = await supabase
-      .from('orders')
+      .from('company_orders')
       .insert([
         {
-          order_no: `TEST-${Date.now()}`,
+          order_no: Date.now().toString() + Math.floor(Math.random() * 10000).toString().padStart(4, '0'),
           company_id: 'test-company',
           order_supplier: 'test-supplier',
           order_date: new Date().toISOString().split('T')[0],
@@ -53,7 +53,7 @@ async function testOrdersConnection() {
     // Test 3: Fetch the order with its items
     console.log('Fetching order with items...');
     const { data: orderWithItems, error: fetchError } = await supabase
-      .from('orders')
+      .from('company_orders')
       .select('*')
       .eq('order_id', orderId)
       .single();
@@ -82,17 +82,17 @@ async function testOrdersConnection() {
     if (deleteItemsError) throw deleteItemsError;
     
     const { error: deleteOrderError } = await supabase
-      .from('orders')
+      .from('company_orders')
       .delete()
       .eq('order_id', orderId);
       
     if (deleteOrderError) throw deleteOrderError;
     
     console.log('Test data cleaned up successfully');
-    console.log('All tests passed! The orders and order_items tables are connected correctly.');
+    console.log('All tests passed! The company_orders and order_items tables are connected correctly.');
     
   } catch (error) {
-    console.error('Error testing orders connection:', error);
+    console.error('Error testing company_orders connection:', error);
   }
 }
 
