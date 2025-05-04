@@ -21,12 +21,17 @@ import {
   DialogContentText,
   DialogActions,
   CircularProgress,
-  Alert
+  Alert,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel
 } from '@mui/material';
 import {
   Visibility as ViewIcon,
   LocalShipping as ShipIcon,
-  ArrowBack as ArrowBackIcon
+  ArrowBack as ArrowBackIcon,
+  Edit as EditIcon
 } from '@mui/icons-material';
 
 const OrderView = ({ setSelectedView }) => {
@@ -36,6 +41,8 @@ const OrderView = ({ setSelectedView }) => {
   const [error, setError] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [openDialog, setOpenDialog] = useState(false);
+  const [openStatusDialog, setOpenStatusDialog] = useState(false);
+  const [newStatus, setNewStatus] = useState('');
 
   useEffect(() => {
     const fetchOrders = async () => {
@@ -45,13 +52,40 @@ const OrderView = ({ setSelectedView }) => {
       }
 
       try {
+        // Fetch orders for the current supplier
         const { data, error } = await supabase
           .from('company_orders')
           .select('*')
           .eq('order_supplier', currentUser.id);
 
         if (error) throw error;
-        setOrders(data || []);
+        
+        // Fetch company names from users table for each order
+        if (data && data.length > 0) {
+          const companyIds = data.map(order => order.company_id);
+          
+          // Get company names from users table
+          const { data: companiesData, error: companiesError } = await supabase
+            .from('users')
+            .select('id, name')
+            .in('id', companyIds);
+
+          if (companiesError) throw companiesError;
+          
+          // Add company names to orders
+          const ordersWithCompanyNames = data.map(order => {
+            const company = companiesData.find(company => company.id === order.company_id);
+            return {
+              ...order,
+              companyName: company?.name || 'Unknown Company'
+            };
+          });
+          
+          setOrders(ordersWithCompanyNames || []);
+        } else {
+          setOrders([]);
+        }
+        
         setError(null);
       } catch (err) {
         console.error('Error fetching orders:', err);
@@ -71,7 +105,7 @@ const OrderView = ({ setSelectedView }) => {
       try {
         const orderIds = orders.map(order => order.order_id);
         const { data, error } = await supabase
-          .from('order_items')
+          .from('company_order_items')
           .select('*')
           .in('order_id', orderIds);
 
@@ -83,8 +117,10 @@ const OrderView = ({ setSelectedView }) => {
             .map(item => ({
               name: item.item_name,
               quantity: item.quantity,
-              price: item.price
+              price: item.price,
+              subtotal: item.quantity * item.price
             }));
+          // Preserve the companyName property when adding items
           return { ...order, items };
         });
 
@@ -123,6 +159,33 @@ const OrderView = ({ setSelectedView }) => {
   const handleViewDetails = (order) => {
     setSelectedOrder(order);
     setOpenDialog(true);
+    
+    // If items aren't loaded yet, fetch them specifically for this order
+    if (!order.items || order.items.length === 0) {
+      const fetchOrderItemsForSelected = async () => {
+        try {
+          const { data, error } = await supabase
+            .from('company_order_items')
+            .select('*')
+            .eq('order_id', order.order_id);
+
+          if (error) throw error;
+
+          const items = data.map(item => ({
+            name: item.item_name,
+            quantity: item.quantity,
+            price: item.price,
+            subtotal: item.quantity * item.price
+          }));
+
+          setSelectedOrder(prev => ({ ...prev, items }));
+        } catch (err) {
+          console.error('Error fetching order items for selected order:', err);
+        }
+      };
+
+      fetchOrderItemsForSelected();
+    }
   };
 
   const handleCloseDialog = () => {
@@ -137,6 +200,32 @@ const OrderView = ({ setSelectedView }) => {
     }
   };
 
+  const handleEditStatus = (order) => {
+    setSelectedOrder(order);
+    setNewStatus(order.order_status);
+    setOpenStatusDialog(true);
+  };
+
+  const handleStatusChange = (event) => {
+    setNewStatus(event.target.value);
+  };
+
+  const handleStatusDialogClose = () => {
+    setOpenStatusDialog(false);
+    setSelectedOrder(null);
+  };
+
+  const handleStatusUpdate = async () => {
+    if (selectedOrder && newStatus) {
+      const success = await updateOrderStatus(selectedOrder.order_id, newStatus);
+      if (success) {
+        handleStatusDialogClose();
+      } else {
+        alert('Failed to update order status. Please try again.');
+      }
+    }
+  };
+
   const getStatusColor = (status) => {
     switch (status) {
       case 'Pending':
@@ -146,6 +235,8 @@ const OrderView = ({ setSelectedView }) => {
       case 'Ready to Ship':
         return 'primary';
       case 'Shipped':
+        return 'success';
+      case 'Delivered':
         return 'success';
       default:
         return 'default';
@@ -198,7 +289,7 @@ const OrderView = ({ setSelectedView }) => {
               orders.map((order) => (
                 <TableRow key={order.order_id}>
                   <TableCell>{order.order_no}</TableCell>
-                  <TableCell>{order.company_id || 'N/A'}</TableCell>
+                  <TableCell>{order.companyName || 'N/A'}</TableCell>
                   <TableCell>{order.order_date}</TableCell>
                   <TableCell>${order.order_total_amount?.toLocaleString() || 0}</TableCell>
                   <TableCell>
@@ -211,6 +302,9 @@ const OrderView = ({ setSelectedView }) => {
                   <TableCell>
                     <IconButton color="primary" onClick={() => handleViewDetails(order)}>
                       <ViewIcon />
+                    </IconButton>
+                    <IconButton color="info" onClick={() => handleEditStatus(order)}>
+                      <EditIcon />
                     </IconButton>
                     {(order.order_status === 'Ready to Ship' || order.order_status === 'Processing') && (
                       <IconButton color="success" onClick={() => handleShipOrder(order.order_id)}>
@@ -233,26 +327,57 @@ const OrderView = ({ setSelectedView }) => {
               <DialogContentText component="div">
                 <Box sx={{ mb: 2 }}>
                   <Typography variant="subtitle1">
-                    Customer: {selectedOrder.company_id || 'N/A'}
+                    Customer: {selectedOrder.companyName || 'N/A'}
                   </Typography>
                   <Typography variant="subtitle1">
-                    Order Date: {selectedOrder.order_date}
+                    Order Date: {new Date(selectedOrder.order_date).toLocaleDateString()}
                   </Typography>
                   <Typography variant="subtitle1">
                     Status: <Chip label={selectedOrder.order_status} color={getStatusColor(selectedOrder.order_status)} size="small" sx={{ ml: 1 }} />
                   </Typography>
                 </Box>
 
-                <Typography variant="h6" sx={{ mt: 2 }}>
-                  Items:
+                <Typography variant="h6" sx={{ mt: 3, mb: 2 }}>
+                  Order Items:
                 </Typography>
-                {selectedOrder.items?.map((item, idx) => (
-                  <Typography key={idx} variant="body2">
-                    {item.name} — Qty: {item.quantity}, Price: ${item.price}
+                
+                {!selectedOrder.items ? (
+                  <Box sx={{ display: 'flex', justifyContent: 'center', my: 3 }}>
+                    <CircularProgress size={30} />
+                    <Typography variant="body2" sx={{ ml: 2 }}>
+                      Loading order items...
+                    </Typography>
+                  </Box>
+                ) : selectedOrder.items.length > 0 ? (
+                  <TableContainer component={Paper} variant="outlined" sx={{ mb: 3 }}>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Item Name</TableCell>
+                          <TableCell align="right">Quantity</TableCell>
+                          <TableCell align="right">Unit Price</TableCell>
+                          <TableCell align="right">Subtotal</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {selectedOrder.items.map((item, idx) => (
+                          <TableRow key={idx}>
+                            <TableCell>{item.name}</TableCell>
+                            <TableCell align="right">{item.quantity}</TableCell>
+                            <TableCell align="right">${parseFloat(item.price).toFixed(2)}</TableCell>
+                            <TableCell align="right">${parseFloat(item.subtotal).toFixed(2)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                ) : (
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    No items found for this order.
                   </Typography>
-                ))}
+                )}
 
-                <Box sx={{ mt: 2 }}>
+                <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
                   <Typography variant="h6">
                     Total Amount: ${selectedOrder.order_total_amount?.toLocaleString() || 0}
                   </Typography>
@@ -274,6 +399,44 @@ const OrderView = ({ setSelectedView }) => {
                   Ship Order
                 </Button>
               )}
+            </DialogActions>
+          </>
+        )}
+      </Dialog>
+
+      {/* Status Edit Dialog */}
+      <Dialog open={openStatusDialog} onClose={handleStatusDialogClose}>
+        {selectedOrder && (
+          <>
+            <DialogTitle>Update Order Status</DialogTitle>
+            <DialogContent>
+              <DialogContentText sx={{ mb: 2 }}>
+                Update the status for order {selectedOrder.order_no}
+              </DialogContentText>
+              <Box sx={{ minWidth: 250 }}>
+                <FormControl fullWidth>
+                  <InputLabel id="status-select-label">Status</InputLabel>
+                  <Select
+                    labelId="status-select-label"
+                    id="status-select"
+                    value={newStatus}
+                    label="Status"
+                    onChange={handleStatusChange}
+                  >
+                    <MenuItem value="Pending">Pending</MenuItem>
+                    <MenuItem value="Processing">Processing</MenuItem>
+                    <MenuItem value="Ready to Ship">Ready to Ship</MenuItem>
+                    <MenuItem value="Shipped">Shipped</MenuItem>
+                    <MenuItem value="Delivered">Delivered</MenuItem>
+                  </Select>
+                </FormControl>
+              </Box>
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={handleStatusDialogClose}>Cancel</Button>
+              <Button onClick={handleStatusUpdate} variant="contained" color="primary">
+                Update Status
+              </Button>
             </DialogActions>
           </>
         )}
