@@ -164,7 +164,6 @@ export function AuthProvider({ children }) {
             .from('consumers')
             .insert([{ 
               consumer_id: userId,
-              created_at: new Date()
             }])
             .select()
           
