@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useCurrency } from '../../contexts/CurrencyContext';
 import {
   Box,
   Typography,
@@ -51,6 +52,8 @@ import { useAuth } from '../../contexts/AuthContext';
 const Checkout = ({ setConsumerView }) => {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
+  // Use currency context for INR conversion
+  const { formatPriceSync } = useCurrency();
   
   // Load cart from localStorage
   const [cart, setCart] = useState(() => {
@@ -320,12 +323,12 @@ const Checkout = ({ setConsumerView }) => {
                 primary={item.name}
                 secondary={
                   <Typography variant="body2" color="text.secondary">
-                    ${item.price.toFixed(2)} x {item.quantity}
+                    {formatPriceSync(item.price)} x {item.quantity}
                   </Typography>
                 }
               />
               <Typography variant="body1">
-                ${(item.price * item.quantity).toFixed(2)}
+                {formatPriceSync(item.price * item.quantity)}
               </Typography>
             </ListItem>
           ))}
@@ -339,7 +342,7 @@ const Checkout = ({ setConsumerView }) => {
               <Typography variant="body1">Subtotal</Typography>
             </Grid>
             <Grid item xs={6} sx={{ textAlign: 'right' }}>
-              <Typography variant="body1">${subtotal.toFixed(2)}</Typography>
+              <Typography variant="body1">{formatPriceSync(subtotal)}</Typography>
             </Grid>
             
             <Grid item xs={6}>
@@ -347,7 +350,7 @@ const Checkout = ({ setConsumerView }) => {
             </Grid>
             <Grid item xs={6} sx={{ textAlign: 'right' }}>
               <Typography variant="body1">
-                {shippingCost === 0 ? 'Free' : `$${shippingCost.toFixed(2)}`}
+                {shippingCost === 0 ? 'Free' : formatPriceSync(shippingCost)}
               </Typography>
             </Grid>
             
@@ -355,14 +358,14 @@ const Checkout = ({ setConsumerView }) => {
               <Typography variant="body1">Tax</Typography>
             </Grid>
             <Grid item xs={6} sx={{ textAlign: 'right' }}>
-              <Typography variant="body1">${tax.toFixed(2)}</Typography>
+              <Typography variant="body1">{formatPriceSync(tax)}</Typography>
             </Grid>
             
             <Grid item xs={6} sx={{ mt: 2 }}>
               <Typography variant="h6">Total</Typography>
             </Grid>
             <Grid item xs={6} sx={{ mt: 2, textAlign: 'right' }}>
-              <Typography variant="h6">${total.toFixed(2)}</Typography>
+              <Typography variant="h6">{formatPriceSync(total)}</Typography>
             </Grid>
           </Grid>
         </Box>
@@ -728,12 +731,12 @@ const Checkout = ({ setConsumerView }) => {
                 primary={item.name}
                 secondary={
                   <Typography variant="body2" color="text.secondary">
-                    ${item.price.toFixed(2)} x {item.quantity}
+                    {formatPriceSync(item.price)} x {item.quantity}
                   </Typography>
                 }
               />
               <Typography variant="body1">
-                ${(item.price * item.quantity).toFixed(2)}
+                {formatPriceSync(item.price * item.quantity)}
               </Typography>
             </ListItem>
           ))}
@@ -747,7 +750,7 @@ const Checkout = ({ setConsumerView }) => {
               <Typography variant="body1">Subtotal</Typography>
             </Grid>
             <Grid item xs={6} sx={{ textAlign: 'right' }}>
-              <Typography variant="body1">${subtotal.toFixed(2)}</Typography>
+              <Typography variant="body1">{formatPriceSync(subtotal)}</Typography>
             </Grid>
             
             <Grid item xs={6}>
@@ -755,7 +758,7 @@ const Checkout = ({ setConsumerView }) => {
             </Grid>
             <Grid item xs={6} sx={{ textAlign: 'right' }}>
               <Typography variant="body1">
-                {shippingCost === 0 ? 'Free' : `$${shippingCost.toFixed(2)}`}
+                {shippingCost === 0 ? 'Free' : formatPriceSync(shippingCost)}
               </Typography>
             </Grid>
             
@@ -763,14 +766,14 @@ const Checkout = ({ setConsumerView }) => {
               <Typography variant="body1">Tax</Typography>
             </Grid>
             <Grid item xs={6} sx={{ textAlign: 'right' }}>
-              <Typography variant="body1">${tax.toFixed(2)}</Typography>
+              <Typography variant="body1">{formatPriceSync(tax)}</Typography>
             </Grid>
             
             <Grid item xs={6} sx={{ mt: 2 }}>
               <Typography variant="h6">Total</Typography>
             </Grid>
             <Grid item xs={6} sx={{ mt: 2, textAlign: 'right' }}>
-              <Typography variant="h6">${total.toFixed(2)}</Typography>
+              <Typography variant="h6">{formatPriceSync(total)}</Typography>
             </Grid>
           </Grid>
         </Box>

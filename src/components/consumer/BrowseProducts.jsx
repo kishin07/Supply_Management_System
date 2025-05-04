@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useCurrency } from '../../contexts/CurrencyContext';
 import {
   Box,
   Typography,
@@ -42,6 +43,8 @@ import {
 } from '@mui/icons-material';
 
 const BrowseProducts = ({ dashboardData, setDashboardData, setConsumerView }) => {
+  // Use the currency context for INR conversion
+  const { formatPriceSync } = useCurrency();
   // Load cart from localStorage or initialize empty array
   const [cart, setCart] = useState(() => {
     const savedCart = localStorage.getItem('cart');
@@ -397,7 +400,7 @@ const BrowseProducts = ({ dashboardData, setDashboardData, setConsumerView }) =>
                       secondary={
                         <>
                           <Typography component="span" variant="body2" color="text.primary">
-                            ${item.price.toFixed(2)}
+                            {formatPriceSync(item.price)}
                           </Typography>
                           <Box sx={{ display: 'flex', alignItems: 'center', mt: 1 }}>
                             <IconButton size="small" onClick={() => handleUpdateQuantity(item.id, -1)}>
@@ -413,7 +416,7 @@ const BrowseProducts = ({ dashboardData, setDashboardData, setConsumerView }) =>
                     />
                     <ListItemSecondaryAction>
                       <Typography variant="body2" sx={{ mb: 1 }}>
-                        ${(item.price * item.quantity).toFixed(2)}
+                        {formatPriceSync(item.price * item.quantity)}
                       </Typography>
                       <IconButton edge="end" onClick={() => handleRemoveFromCart(item.id)}>
                         <DeleteIcon />
@@ -428,7 +431,7 @@ const BrowseProducts = ({ dashboardData, setDashboardData, setConsumerView }) =>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
                 <Typography variant="subtitle1">Total:</Typography>
                 <Typography variant="subtitle1" fontWeight="bold">
-                  ${cartTotal.toFixed(2)}
+                  {formatPriceSync(cartTotal)}
                 </Typography>
               </Box>
               
@@ -502,7 +505,7 @@ const BrowseProducts = ({ dashboardData, setDashboardData, setConsumerView }) =>
               </Grid>
               
               <Grid item xs={12} sm={4}>
-                <Typography gutterBottom>Price Range: ${priceRange[0]} - ${priceRange[1]}</Typography>
+                <Typography gutterBottom>Price Range: {formatPriceSync(priceRange[0])} - {formatPriceSync(priceRange[1])}</Typography>
                 <Slider
                   value={priceRange}
                   onChange={(e, newValue) => setPriceRange(newValue)}
@@ -541,7 +544,7 @@ const BrowseProducts = ({ dashboardData, setDashboardData, setConsumerView }) =>
                   {product.brand} • {product.volume}
                 </Typography>
                 <Typography variant="h6" color="primary" gutterBottom>
-                  ${product.price.toFixed(2)}
+                  {formatPriceSync(product.price)}
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                   {product.description}

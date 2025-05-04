@@ -1,4 +1,5 @@
 import React from 'react';
+import { useCurrency } from '../../contexts/CurrencyContext';
 import {
   Box,
   Typography,
@@ -16,6 +17,8 @@ ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointE
 
 const SpendingAnalysis = ({ dashboardData, setDashboardData }) => {
   const data = dashboardData.consumer;
+  // Use currency context for INR conversion
+  const { formatPriceSync } = useCurrency();
   
   // Monthly spending data (already in dashboardData)
   const monthlySpendingData = data.spendingHistory;
@@ -61,7 +64,7 @@ const SpendingAnalysis = ({ dashboardData, setDashboardData }) => {
       y: {
         beginAtZero: true,
         ticks: {
-          callback: (value) => `$${value}`
+          callback: (value) => `₹${value}`
         }
       }
     },
@@ -79,7 +82,7 @@ const SpendingAnalysis = ({ dashboardData, setDashboardData }) => {
       y: {
         beginAtZero: true,
         ticks: {
-          callback: (value) => `$${value}`
+          callback: (value) => `₹${value}`
         }
       }
     },
@@ -98,7 +101,7 @@ const SpendingAnalysis = ({ dashboardData, setDashboardData }) => {
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>Total Spent</Typography>
-              <Typography variant="h3" color="primary">${data.totalSpent.toLocaleString()}</Typography>
+              <Typography variant="h3" color="primary">{formatPriceSync(data.totalSpent)}</Typography>
               <Typography variant="body2" color="text.secondary">Lifetime spending</Typography>
             </CardContent>
           </Card>
@@ -107,7 +110,7 @@ const SpendingAnalysis = ({ dashboardData, setDashboardData }) => {
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>Average Order</Typography>
-              <Typography variant="h3" color="secondary">${(data.totalSpent / data.orderHistory).toFixed(2)}</Typography>
+              <Typography variant="h3" color="secondary">{formatPriceSync(data.totalSpent / data.orderHistory)}</Typography>
               <Typography variant="body2" color="text.secondary">Based on {data.orderHistory} orders</Typography>
             </CardContent>
           </Card>
@@ -116,7 +119,7 @@ const SpendingAnalysis = ({ dashboardData, setDashboardData }) => {
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>Last Purchase</Typography>
-              <Typography variant="h3" color="info.main">$450</Typography>
+              <Typography variant="h3" color="info.main">{formatPriceSync(450)}</Typography>
               <Typography variant="body2" color="text.secondary">October 30, 2023</Typography>
             </CardContent>
           </Card>
@@ -162,11 +165,11 @@ const SpendingAnalysis = ({ dashboardData, setDashboardData }) => {
         <Grid container spacing={2}>
           <Grid item xs={12} md={4}>
             <Typography variant="subtitle1" gutterBottom>Top Spending Category</Typography>
-            <Typography variant="body1">Electronics - $1,200</Typography>
+            <Typography variant="body1">Electronics - {formatPriceSync(1200)}</Typography>
           </Grid>
           <Grid item xs={12} md={4}>
             <Typography variant="subtitle1" gutterBottom>Highest Spending Month</Typography>
-            <Typography variant="body1">April - $500</Typography>
+            <Typography variant="body1">April - {formatPriceSync(500)}</Typography>
           </Grid>
           <Grid item xs={12} md={4}>
             <Typography variant="subtitle1" gutterBottom>Year-over-Year Growth</Typography>

@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
+import { useCurrency } from '../contexts/CurrencyContext'
 import {
   Container,
   Grid,
@@ -24,7 +26,6 @@ import {
   Store as StoreIcon,
   History as HistoryIcon
 } from '@mui/icons-material'
-import { useAuth } from '../contexts/AuthContext'
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement, Title } from 'chart.js'
 import { Pie, Line } from 'react-chartjs-2'
 import OrderHistory from '../components/consumer/OrderHistory'
@@ -39,6 +40,7 @@ ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointE
 function ConsumerDashboard() {
   const { currentUser } = useAuth()
   const navigate = useNavigate()
+  const { formatPriceSync } = useCurrency()
   
   // Redirect to login if no user is found
   useEffect(() => {
@@ -175,7 +177,7 @@ function ConsumerDashboard() {
                 <CardContent>
                   <AnalyticsIcon color="info" sx={{ fontSize: 40 }} />
                   <Typography variant="h5" component="div">
-                    ${dashboardData.totalSpent.toLocaleString()}
+                    {formatPriceSync(dashboardData.totalSpent)}
                   </Typography>
                   <Typography color="text.secondary">
                     Total Spent
@@ -230,7 +232,7 @@ function ConsumerDashboard() {
                     y: {
                       beginAtZero: true,
                       ticks: {
-                        callback: (value) => `$${value}`
+                        callback: (value) => `₹${value}`
                       }
                     }
                   }
