@@ -123,18 +123,15 @@ const ManageOrders = ({ dashboardData, setDashboardData, setCompanyView }) => {
       // Update dashboard data
       setDashboardData(prev => ({
         ...prev,
-        company: {
-          ...prev.company,
-          totalOrders: orders.length,
-          pendingShipments: pendingCount + processingCount,
-          orderDistribution: {
-            labels: ['Pending', 'Processing', 'Shipped', 'Delivered'],
-            datasets: [{
-              data: [pendingCount, processingCount, shippedCount, deliveredCount],
-              backgroundColor: ['#FF6384', '#36A2EB', '#FFCE56', '#4CAF50'],
-              hoverBackgroundColor: ['#FF6384', '#36A2EB', '#FFCE56', '#4CAF50']
-            }]
-          }
+        totalOrders: orders.length,
+        pendingShipments: pendingCount + processingCount,
+        orderDistribution: {
+          labels: ['Pending', 'Processing', 'Shipped', 'Delivered'],
+          datasets: [{
+            data: [pendingCount, processingCount, shippedCount, deliveredCount],
+            backgroundColor: ['#FF6384', '#36A2EB', '#FFCE56', '#4CAF50'],
+            hoverBackgroundColor: ['#FF6384', '#36A2EB', '#FFCE56', '#4CAF50']
+          }]
         }
       }));
     }
