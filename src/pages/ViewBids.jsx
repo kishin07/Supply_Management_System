@@ -242,14 +242,14 @@ const ViewBids = () => {
                     <TableCell>{formatDate(bid.bid_delivery)}</TableCell>
                     <TableCell>{new Date(bid.created_at).toLocaleString()}</TableCell>
                     <TableCell>{getBidStatusChip(bid.status)}</TableCell>
-                    <TableCell>
-                      {
+npm                    <TableCell>
+                      {bid.status === 'pending' && (
                         <Box sx={{ display: 'flex', gap: 1 }}>
                           <Button 
                             size="small" 
                             variant="contained" 
                             color="success"
-                            
+                            onClick={() => acceptBid(bid.bid_id)}
                           >
                             Accept
                           </Button>
@@ -257,12 +257,12 @@ const ViewBids = () => {
                             size="small" 
                             variant="outlined" 
                             color="error"
-                            
+                            onClick={() => rejectBid(bid.bid_id)}
                           >
                             Reject
                           </Button>
                         </Box>
-                      }
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
