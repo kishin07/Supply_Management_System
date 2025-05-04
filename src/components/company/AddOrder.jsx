@@ -32,14 +32,41 @@ import {
 import supabase from '../../supabase';
 import { useAuth } from '../../contexts/AuthContext';
 
-// Generate a unique numeric-only order number
+// Generate a universally unique numeric-only order number
 const generateOrderNumber = () => {
-  // Use timestamp for uniqueness, ensuring it's only numbers
-  const timestamp = Date.now().toString();
-  // Add random digits to further ensure uniqueness
-  const randomDigits = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
-  // Combine for a purely numeric order number
-  return timestamp + randomDigits;
+  // Get current timestamp (milliseconds since epoch)
+  const timestamp = Date.now();
+  
+  // Extract different parts of the timestamp for better uniqueness
+  const seconds = Math.floor(timestamp / 1000) % 100000; // Last 5 digits of seconds
+  const milliseconds = timestamp % 1000; // Milliseconds (0-999)
+  
+  // Add random component for additional uniqueness (0-9999)
+  const randomComponent = Math.floor(Math.random() * 10000);
+  
+  // Create a counter that cycles from 0-999 to ensure uniqueness even if generated in same millisecond
+  // This is stored and incremented in a module-level variable
+  if (typeof window._orderNumberCounter === 'undefined') {
+    window._orderNumberCounter = 0;
+  } else {
+    window._orderNumberCounter = (window._orderNumberCounter + 1) % 1000;
+  }
+  
+  // Combine all components into a single string
+  // Format: SSSSSMMMRTTC where:
+  // SSSSS = 5 digits of seconds since epoch
+  // MMM = 3 digits of milliseconds
+  // R = 4 digits of random component
+  // C = 3 digits of counter
+  
+  // Pad each component to ensure consistent length
+  const secondsStr = seconds.toString().padStart(5, '0');
+  const msStr = milliseconds.toString().padStart(3, '0');
+  const randomStr = randomComponent.toString().padStart(4, '0');
+  const counterStr = window._orderNumberCounter.toString().padStart(3, '0');
+  
+  // Combine all parts into a 15-digit numeric string
+  return secondsStr + msStr + randomStr + counterStr;
 };
 
 const AddOrder = ({ setOrderView }) => {
@@ -148,8 +175,10 @@ const AddOrder = ({ setOrderView }) => {
     
     // Cleanup function to handle component unmounting
     return () => {
-      // Don't remove localStorage on unmount - we want to persist the data
-      // Only remove if navigating away from the form intentionally (handled in submit)
+      // Clear localStorage on unmount to prevent stale data
+      console.log('Component unmounting, cleaning up localStorage');
+      localStorage.removeItem('orderFormData');
+      localStorage.removeItem('orderCurrentItem');
     };
   }, [formData]);
 
@@ -177,8 +206,9 @@ const AddOrder = ({ setOrderView }) => {
     
     // Cleanup function to handle component unmounting
     return () => {
-      // Don't remove localStorage on unmount - we want to persist the data
-      // Only remove if navigating away from the form intentionally (handled in submit)
+      // Clear localStorage on unmount to prevent stale data
+      console.log('Current item component unmounting, cleaning up localStorage');
+      localStorage.removeItem('orderCurrentItem');
     };
   }, [currentItem]);
 
@@ -235,6 +265,132 @@ const AddOrder = ({ setOrderView }) => {
     }
 
     try {
+      // Check if order number already exists
+      const { data: existingOrders, error: checkError } = await supabase
+        .from('company_orders')
+        .select('order_id')
+        .eq('order_no', formData.orderNumber)
+        .limit(1);
+      
+      if (checkError) throw checkError;
+      
+      // If order number already exists, generate a new one and try again
+      if (existingOrders && existingOrders.length > 0) {
+        const newOrderNumber = generateOrderNumber();
+        setFormData(prev => ({
+          ...prev,
+          orderNumber: newOrderNumber
+        }));
+        
+        // Check if the new order number also exists (very unlikely but possible)
+        const { data: recheckOrders, error: recheckError } = await supabase
+          .from('company_orders')
+          .select('order_id')
+          .eq('order_no', newOrderNumber)
+          .limit(1);
+          
+        if (recheckError) throw recheckError;
+        
+        // If the new order number also exists (extremely rare case), notify user and exit
+        if (recheckOrders && recheckOrders.length > 0) {
+          setSnackbarMessage('Order number conflict detected. Please try again in a moment.');
+          setSnackbarSeverity('error');
+          setOpenSnackbar(true);
+          return; // Exit the function to prevent creating the order with duplicate number
+        }
+        
+        // If the new order number is unique, continue with order creation using the new number
+        const { data: orderData, error: orderError } = await supabase
+          .from('company_orders')
+          .insert([
+            {
+              order_no: newOrderNumber,
+              order_date: formData.orderDate,
+              order_supplier: formData.supplierId,
+              supplier_id: formData.supplierId,
+              company_id: currentUser.id,
+              order_status: formData.status,
+              order_total_amount: formData.totalAmount
+            }
+          ])
+          .select();
+
+        if (orderError) throw orderError;
+        
+        // Continue with the rest of the function using orderData
+        if (orderData && orderData.length > 0) {
+          // Add order items
+          const orderItems = formData.items.map(item => ({
+            order_id: orderData[0].order_id,
+            item_name: item.name,
+            quantity: item.quantity,
+            price: item.price
+          }));
+
+          try {
+            const { error: itemsError } = await supabase
+              .from('company_order_items')
+              .insert(orderItems);
+
+            if (itemsError) throw itemsError;
+          } catch (itemErr) {
+            // If there's an error inserting items, delete the parent order to maintain data integrity
+            console.error('Error inserting order items:', itemErr);
+            
+            // Delete the parent order since items insertion failed
+            const { error: deleteError } = await supabase
+              .from('company_orders')
+              .delete()
+              .eq('order_id', orderData[0].order_id);
+              
+            if (deleteError) {
+              console.error('Error deleting order after items insertion failed:', deleteError);
+            }
+            
+            // Throw the original error to be caught by the outer catch block
+            throw new Error(`Failed to add order items: ${itemErr.message}. The order has been cancelled.`);
+          }
+
+          setSnackbarMessage('Order created successfully with a new order number');
+          setSnackbarSeverity('success');
+          setOpenSnackbar(true);
+
+          // Clear all order-related localStorage items after successful order creation
+          console.log('Before clearing localStorage:', {
+            orderFormData: localStorage.getItem('orderFormData'),
+            orderCurrentItem: localStorage.getItem('orderCurrentItem'),
+            orders: localStorage.getItem('orders'),
+            customerOrders: localStorage.getItem('customerOrders')
+          });
+          
+          localStorage.removeItem('orderFormData');
+          localStorage.removeItem('orderCurrentItem');
+          localStorage.removeItem('orders');
+          localStorage.removeItem('customerOrders');
+          
+          // Force synchronous localStorage clearing
+          window.localStorage.removeItem('orderFormData');
+          window.localStorage.removeItem('orderCurrentItem');
+          window.localStorage.removeItem('orders');
+          window.localStorage.removeItem('customerOrders');
+          
+          console.log('After clearing localStorage:', {
+            orderFormData: localStorage.getItem('orderFormData'),
+            orderCurrentItem: localStorage.getItem('orderCurrentItem'),
+            orders: localStorage.getItem('orders'),
+            customerOrders: localStorage.getItem('customerOrders')
+          });
+          
+          console.log('Order created successfully with new order number. All order-related localStorage data cleared.');
+          
+          setTimeout(() => {
+            setOrderView('list');
+          }, 1500);
+        }
+        
+        return; // Exit to prevent executing the code below which would create another order
+      }
+      
       // Add new order
       const { data: orderData, error: orderError } = await supabase
         .from('company_orders')
@@ -262,20 +418,63 @@ const AddOrder = ({ setOrderView }) => {
           price: item.price
         }));
 
-        const { error: itemsError } = await supabase
-          .from('order_items')
-          .insert(orderItems);
+        try {
+          const { error: itemsError } = await supabase
+            .from('company_order_items')
+            .insert(orderItems);
 
-        if (itemsError) throw itemsError;
+          if (itemsError) throw itemsError;
+        } catch (itemErr) {
+          // If there's an error inserting items, delete the parent order to maintain data integrity
+          console.error('Error inserting order items:', itemErr);
+          
+          // Delete the parent order since items insertion failed
+          const { error: deleteError } = await supabase
+            .from('company_orders')
+            .delete()
+            .eq('order_id', orderData[0].order_id);
+            
+          if (deleteError) {
+            console.error('Error deleting order after items insertion failed:', deleteError);
+          }
+          
+          // Throw the original error to be caught by the outer catch block
+          throw new Error(`Failed to add order items: ${itemErr.message}. The order has been cancelled.`);
+        }
 
         setSnackbarMessage('Order created successfully');
         setSnackbarSeverity('success');
         setOpenSnackbar(true);
 
         // Navigate back to orders list
-        // Clear localStorage after successful order creation
+        // Clear all order-related localStorage items after successful order creation
+        console.log('Before clearing localStorage (standard flow):', {
+          orderFormData: localStorage.getItem('orderFormData'),
+          orderCurrentItem: localStorage.getItem('orderCurrentItem'),
+          orders: localStorage.getItem('orders'),
+          customerOrders: localStorage.getItem('customerOrders')
+        });
+        
         localStorage.removeItem('orderFormData');
         localStorage.removeItem('orderCurrentItem');
+        localStorage.removeItem('orders'); // Clear any stored orders data
+        localStorage.removeItem('customerOrders'); // Clear any customer orders data if exists
+        
+        // Force synchronous localStorage clearing
+        window.localStorage.removeItem('orderFormData');
+        window.localStorage.removeItem('orderCurrentItem');
+        window.localStorage.removeItem('orders');
+        window.localStorage.removeItem('customerOrders');
+        
+        console.log('After clearing localStorage (standard flow):', {
+          orderFormData: localStorage.getItem('orderFormData'),
+          orderCurrentItem: localStorage.getItem('orderCurrentItem'),
+          orders: localStorage.getItem('orders'),
+          customerOrders: localStorage.getItem('customerOrders')
+        });
+        
+        // Log to console for confirmation
+        console.log('Order created successfully. All order-related localStorage data cleared.');
         
         setTimeout(() => {
           setOrderView('list');
@@ -299,7 +498,13 @@ const AddOrder = ({ setOrderView }) => {
         <IconButton 
           color="primary" 
           sx={{ mr: 2 }}
-          onClick={() => setOrderView('list')}
+          onClick={() => {
+            // Clear localStorage when navigating away
+            console.log('Navigating away from form, clearing localStorage');
+            localStorage.removeItem('orderFormData');
+            localStorage.removeItem('orderCurrentItem');
+            setOrderView('list');
+          }}
         >
           <ArrowBackIcon />
         </IconButton>
@@ -324,7 +529,7 @@ const AddOrder = ({ setOrderView }) => {
                 onChange={handleInputChange}
                 disabled
                 margin="normal"
-                helperText="Automatically generated numeric ID (e.g., 16990000001234)"
+                helperText="Automatically generated 15-digit unique numeric ID"
               />
             </Grid>
             <Grid item xs={12} md={6}>
