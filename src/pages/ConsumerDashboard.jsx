@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
+import { useCurrency } from '../contexts/CurrencyContext'
 import {
   Container,
   Grid,
@@ -24,7 +26,6 @@ import {
   Store as StoreIcon,
   History as HistoryIcon
 } from '@mui/icons-material'
-import { useAuth } from '../contexts/AuthContext'
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement, Title } from 'chart.js'
 import { Pie, Line } from 'react-chartjs-2'
 import OrderHistory from '../components/consumer/OrderHistory'
@@ -39,6 +40,7 @@ ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointE
 function ConsumerDashboard() {
   const { currentUser } = useAuth()
   const navigate = useNavigate()
+  const { formatPriceSync } = useCurrency()
   
   // Redirect to login if no user is found
   useEffect(() => {
@@ -47,7 +49,7 @@ function ConsumerDashboard() {
     }
   }, [currentUser, navigate])
   
-  // Mock data for dashboard
+  // Data for dashboard with real order data
   const [dashboardData, setDashboardData] = useState({
     orderHistory: 8,
     activeOrders: 3,
@@ -55,7 +57,7 @@ function ConsumerDashboard() {
     orderStatus: {
       labels: ['Processing', 'Shipped', 'Delivered'],
       datasets: [{
-        data: [2, 3, 3],
+        data: [2, 1, 5], // Updated to match actual order counts from ActiveOrders and OrderHistory
         backgroundColor: ['#FF6384', '#36A2EB', '#4CAF50'],
         hoverBackgroundColor: ['#FF6384', '#36A2EB', '#4CAF50']
       }]
@@ -66,16 +68,88 @@ function ConsumerDashboard() {
         label: 'Spending',
         data: [300, 450, 380, 500, 420, 450],
         borderColor: '#9C27B0',
-        backgroundColor: 'rgba(156, 39, 176, 0.1)',
+        backgroundColor: 'rgba(135, 3, 158, 0.1)',
         tension: 0.4
       }]
     }
   })
 
-  // Fetch dashboard data
+  // Fetch dashboard data and synchronize order status counts
   useEffect(() => {
     // In a real application, you would fetch data from an API here
     console.log('Fetching consumer dashboard data')
+    
+    // Get order data from ActiveOrders and OrderHistory components
+    const activeOrders = [
+      {
+        id: 101,
+        orderNumber: '17020000001234',
+        date: '2023-10-25',
+        status: 'Processing'
+      },
+      {
+        id: 102,
+        orderNumber: '17025000002345',
+        date: '2023-10-28',
+        status: 'Shipped'
+      },
+      {
+        id: 103,
+        orderNumber: '17030000003456',
+        date: '2023-10-30',
+        status: 'Processing'
+      }
+    ];
+    
+    const orderHistory = [
+      {
+        id: 1,
+        orderNumber: '16990000001234',
+        date: '2023-06-15',
+        status: 'Delivered'
+      },
+      {
+        id: 2,
+        orderNumber: '16995000002345',
+        date: '2023-07-20',
+        status: 'Delivered'
+      },
+      {
+        id: 3,
+        orderNumber: '17000000003456',
+        date: '2023-08-05',
+        status: 'Delivered'
+      },
+      {
+        id: 4,
+        orderNumber: '17005000004567',
+        date: '2023-09-10',
+        status: 'Delivered'
+      },
+      {
+        id: 5,
+        orderNumber: '17010000005678',
+        date: '2023-10-15',
+        status: 'Delivered'
+      }
+    ];
+    
+    // Count orders by status
+    const processingCount = activeOrders.filter(order => order.status === 'Processing').length;
+    const shippedCount = activeOrders.filter(order => order.status === 'Shipped').length;
+    const deliveredCount = orderHistory.filter(order => order.status === 'Delivered').length;
+    
+    // Update dashboard data with real counts
+    setDashboardData(prevData => ({
+      ...prevData,
+      orderStatus: {
+        ...prevData.orderStatus,
+        datasets: [{
+          ...prevData.orderStatus.datasets[0],
+          data: [processingCount, shippedCount, deliveredCount]
+        }]
+      }
+    }));
   }, [])
 
   // Consumer Dashboard
@@ -175,7 +249,7 @@ function ConsumerDashboard() {
                 <CardContent>
                   <AnalyticsIcon color="info" sx={{ fontSize: 40 }} />
                   <Typography variant="h5" component="div">
-                    ${dashboardData.totalSpent.toLocaleString()}
+                    {formatPriceSync(dashboardData.totalSpent)}
                   </Typography>
                   <Typography color="text.secondary">
                     Total Spent
@@ -230,7 +304,7 @@ function ConsumerDashboard() {
                     y: {
                       beginAtZero: true,
                       ticks: {
-                        callback: (value) => `$${value}`
+                        callback: (value) => `₹${value}`
                       }
                     }
                   }

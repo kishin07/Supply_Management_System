@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './contexts/AuthContext'
 import { BiddingProvider } from './contexts/BiddingContext'
+import { CurrencyProvider } from './contexts/CurrencyContext'
 import MainLayout from './components/layout/MainLayout'
 import Register from './pages/Register'
 import Login from './pages/Login'
@@ -39,8 +40,9 @@ function App() {
 
   return (
     <BiddingProvider>
-      <MainLayout>
-        <Routes>
+      <CurrencyProvider>
+        <MainLayout>
+          <Routes>
           <Route path="/register" element={<Register />} />
           <Route path="/login" element={<Login />} />
           <Route 
@@ -93,8 +95,9 @@ function App() {
           />
 
           <Route path="*" element={<Navigate to={currentUser ? "/dashboard" : "/login"} />} />
-        </Routes>
-      </MainLayout>
+          </Routes>
+        </MainLayout>
+      </CurrencyProvider>
     </BiddingProvider>
   )
 }
