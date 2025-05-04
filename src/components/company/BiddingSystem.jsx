@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useBidding } from '../../contexts/BiddingContext';
+import supabase from '../../supabase';
 import {
   Box,
   Typography,
@@ -94,18 +95,52 @@ const BiddingSystem = ({ setCompanyView }) => {
     setRfqs(companyRfqs);
   };
 
-  const loadBids = (rfqId) => {
-    const rfqBids = getBids(rfqId);
-    setBids(rfqBids);
+  const loadBids = async (rfqId) => {
+    setLoading(true);
+    try {
+      // Directly query the supplier_bids table for the given quotation_id
+      const { data, error } = await supabase
+        .from('supplier_bids')
+        .select('*')
+        .eq('quotation_id', rfqId)
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      
+      // Format the bids data for display
+      const formattedBids = data.map(bid => ({
+        id: bid.bid_id,
+        rfqId: bid.quotation_id,
+        supplierId: bid.supplier_id,
+        supplierName: 'Supplier', // You may want to fetch supplier names separately
+        price: bid.bid_price,
+        deliveryDate: bid.bid_delivery,
+        terms: bid.bid_terms,
+        status: bid.status || 'Submitted',
+        createdAt: bid.created_at,
+        selected: false
+      }));
+      
+      setBids(formattedBids);
+    } catch (err) {
+      console.error('Error fetching bids:', err);
+      setSnackbar({
+        open: true,
+        message: 'Failed to load bids: ' + err.message,
+        severity: 'error'
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleTabChange = (event, newValue) => {
     setTabValue(newValue);
   };
 
-  const handleRfqClick = (rfq) => {
+  const handleRfqClick = async (rfq) => {
     setSelectedRfq(rfq);
-    loadBids(rfq.id);
+    await loadBids(rfq.quotation_id || rfq.id); // Use quotation_id if available, otherwise fall back to id
     setTabValue(1); // Switch to Bids tab
   };
 
@@ -145,44 +180,101 @@ const BiddingSystem = ({ setCompanyView }) => {
     setOpenBidDialog(true);
   };
 
-  const handleAcceptBid = (bid) => {
-    updateBidStatus(bid.id, 'Accepted');
-    // Reject all other bids for this RFQ
-    bids.forEach(otherBid => {
-      if (otherBid.id !== bid.id) {
-        updateBidStatus(otherBid.id, 'Rejected');
+  const handleAcceptBid = async (bid) => {
+    try {
+      // Update the selected bid to accepted
+      const { error: updateError } = await supabase
+        .from('supplier_bids')
+        .update({ status: 'Accepted' })
+        .eq('bid_id', bid.id);
+
+      if (updateError) throw updateError;
+
+      // Reject all other bids for this RFQ
+      const { error: rejectError } = await supabase
+        .from('supplier_bids')
+        .update({ status: 'Rejected' })
+        .eq('quotation_id', bid.rfqId)
+        .neq('bid_id', bid.id);
+
+      if (rejectError) throw rejectError;
+      
+      // Update RFQ status if needed
+      // This would require updating the quotations table
+      
+      // Refresh bids
+      await loadBids(bid.rfqId);
+      loadRfqs();
+      setSnackbar({
+        open: true,
+        message: 'Bid accepted successfully',
+        severity: 'success'
+      });
+    } catch (err) {
+      console.error('Error accepting bid:', err);
+      setSnackbar({
+        open: true,
+        message: 'Failed to accept bid: ' + err.message,
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleRejectBid = async (bid) => {
+    try {
+      const { error } = await supabase
+        .from('supplier_bids')
+        .update({ status: 'Rejected' })
+        .eq('bid_id', bid.id);
+
+      if (error) throw error;
+
+      // Refresh bids
+      await loadBids(bid.rfqId);
+      setSnackbar({
+        open: true,
+        message: 'Bid rejected',
+        severity: 'info'
+      });
+    } catch (err) {
+      console.error('Error rejecting bid:', err);
+      setSnackbar({
+        open: true,
+        message: 'Failed to reject bid: ' + err.message,
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleCloseRfq = async (rfqId) => {
+    try {
+      // Update the quotation status to Closed
+      const { error } = await supabase
+        .from('quotations')
+        .update({ status: 'Closed' })
+        .eq('quotation_id', rfqId);
+
+      if (error) throw error;
+      
+      // Refresh data
+      loadRfqs();
+      if (selectedRfq && (selectedRfq.quotation_id === rfqId || selectedRfq.id === rfqId)) {
+        await loadBids(rfqId);
       }
-    });
-    // Update RFQ status
-    updateRfqStatus(bid.rfqId, 'Awarded');
-    loadBids(bid.rfqId);
-    loadRfqs();
-    setSnackbar({
-      open: true,
-      message: 'Bid accepted successfully',
-      severity: 'success'
-    });
-  };
-
-  const handleRejectBid = (bid) => {
-    updateBidStatus(bid.id, 'Rejected');
-    loadBids(bid.rfqId);
-    setSnackbar({
-      open: true,
-      message: 'Bid rejected',
-      severity: 'info'
-    });
-  };
-
-  const handleCloseRfq = (rfqId) => {
-    updateRfqStatus(rfqId, 'Closed');
-    loadRfqs();
-    loadBids(rfqId);
-    setSnackbar({
-      open: true,
-      message: 'RFQ closed successfully',
-      severity: 'info'
-    });
+      
+      setSnackbar({
+        open: true,
+        message: 'RFQ closed successfully',
+        severity: 'info'
+      });
+    } catch (err) {
+      console.error('Error closing RFQ:', err);
+      setSnackbar({
+        open: true,
+        message: 'Failed to close RFQ: ' + err.message,
+        severity: 'error'
+      });
+    }
   };
 
   const handleCompareBids = () => {
@@ -206,43 +298,68 @@ const BiddingSystem = ({ setCompanyView }) => {
     setBids(updatedBids);
   };
 
-  const exportBidsToCSV = (rfqId) => {
-    const rfq = getRfqById(rfqId);
-    const rfqBids = getBids(rfqId);
+  const exportBidsToCSV = async (rfqId) => {
+    const rfq = selectedRfq; // Use the already selected RFQ
     
-    if (!rfq || rfqBids.length === 0) {
+    // Fetch bids directly from Supabase
+    try {
+      const { data, error } = await supabase
+        .from('supplier_bids')
+        .select('*')
+        .eq('quotation_id', rfqId);
+      
+      if (error) throw error;
+      
+      if (!rfq || !data || data.length === 0) {
+        setSnackbar({
+          open: true,
+          message: 'No data to export',
+          severity: 'error'
+        });
+        return;
+      }
+      
+      // Format the bids for CSV export
+      const rfqBids = data.map(bid => ({
+        supplierName: 'Supplier ' + bid.supplier_id.substring(0, 5),
+        price: bid.bid_price,
+        deliveryDate: bid.bid_delivery,
+        status: bid.status || 'Submitted',
+        createdAt: bid.created_at
+      }));
+    
+      // Create CSV content
+      const headers = ['Supplier', 'Price', 'Delivery Date', 'Status', 'Submission Date'];
+      const rows = rfqBids.map(bid => [
+        bid.supplierName,
+        bid.price,
+        bid.deliveryDate,
+        bid.status,
+        new Date(bid.createdAt).toLocaleDateString()
+      ]);
+      
+      const csvContent = [
+        headers.join(','),
+        ...rows.map(row => row.join(','))
+      ].join('\n');
+      
+      // Create and download file
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `bids_for_${rfq.itemName}_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      console.error('Error exporting bids to CSV:', err);
       setSnackbar({
         open: true,
-        message: 'No data to export',
+        message: 'Failed to export bids: ' + err.message,
         severity: 'error'
       });
-      return;
     }
-    
-    // Create CSV content
-    const headers = ['Supplier', 'Price', 'Delivery Date', 'Status', 'Submission Date'];
-    const rows = rfqBids.map(bid => [
-      bid.supplierName,
-      bid.price,
-      bid.deliveryDate,
-      bid.status,
-      new Date(bid.createdAt).toLocaleDateString()
-    ]);
-    
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.join(','))
-    ].join('\n');
-    
-    // Create and download file
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `bids_for_${rfq.itemName}_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
   };
 
   // Render RFQ list
@@ -322,7 +439,7 @@ const BiddingSystem = ({ setCompanyView }) => {
                       <Button 
                         size="small" 
                         color="secondary" 
-                        onClick={() => handleCloseRfq(rfq.id)}
+                        onClick={() => handleCloseRfq(rfq.quotation_id || rfq.id)}
                       >
                         Close RFQ
                       </Button>
@@ -397,7 +514,7 @@ const BiddingSystem = ({ setCompanyView }) => {
             <Button 
               variant="contained" 
               startIcon={<RefreshIcon />} 
-              onClick={() => loadBids(selectedRfq.id)}
+              onClick={() => loadBids(selectedRfq.quotation_id || selectedRfq.id)}
               sx={{ mr: 1 }}
             >
               Refresh
@@ -417,7 +534,7 @@ const BiddingSystem = ({ setCompanyView }) => {
           <Button 
             variant="outlined" 
             startIcon={<DownloadIcon />} 
-            onClick={() => exportBidsToCSV(selectedRfq.id)}
+            onClick={() => exportBidsToCSV(selectedRfq.quotation_id || selectedRfq.id)}
           >
             Export
           </Button>

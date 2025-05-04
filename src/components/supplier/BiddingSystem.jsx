@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useBidding } from '../../contexts/BiddingContext';
 import { useAuth } from '../../contexts/AuthContext';
+import supabase from '../../supabase';
 import {
   Box,
   Typography,
@@ -46,7 +47,7 @@ import {
   Edit as EditIcon,
   Visibility as ViewIcon,
   Notifications as NotificationsIcon,
-  AttachFile as AttachFileIcon
+  Close as CloseIcon
 } from '@mui/icons-material';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { LocalizationProvider, DatePicker } from '@mui/x-date-pickers';
@@ -58,7 +59,6 @@ const BiddingSystem = ({ setSelectedView }) => {
     getRfqs, 
     getBids, 
     submitBid,
-    getRfqById,
     loading,
     error 
   } = useBidding();
@@ -66,6 +66,9 @@ const BiddingSystem = ({ setSelectedView }) => {
   const [tabValue, setTabValue] = useState(0);
   const [rfqs, setRfqs] = useState([]);
   const [myBids, setMyBids] = useState([]);
+  const [quotations, setQuotations] = useState([]);
+  const [quotationsLoading, setQuotationsLoading] = useState(false);
+  const [quotationsError, setQuotationsError] = useState(null);
   const [selectedRfq, setSelectedRfq] = useState(null);
   const [openBidDialog, setOpenBidDialog] = useState(false);
   const [openViewRfqDialog, setOpenViewRfqDialog] = useState(false);
@@ -74,25 +77,31 @@ const BiddingSystem = ({ setSelectedView }) => {
   const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+  const [isEditingBid, setIsEditingBid] = useState(false);
   
   // New bid form state
   const [newBid, setNewBid] = useState({
     price: '',
     deliveryDate: null,
-    terms: '',
-    documents: []
+    terms: ''
   });
 
-  // Load RFQs and bids on component mount
+  // Load RFQs, bids, and quotations on component mount
   useEffect(() => {
     loadRfqs();
-    loadMyBids();
+    const fetchData = async () => {
+      await loadMyBids();
+      await fetchQuotations();
+    };
+    fetchData();
+    
     // Check for new RFQs and create notifications
     const storedNotifications = localStorage.getItem('supplierNotifications');
     if (storedNotifications) {
       setNotifications(JSON.parse(storedNotifications));
     }
   }, []);
+
 
   // Save notifications to localStorage when they change
   useEffect(() => {
@@ -123,13 +132,72 @@ const BiddingSystem = ({ setSelectedView }) => {
     localStorage.setItem('lastRfqCheck', new Date().toISOString());
   };
 
-  const loadMyBids = () => {
-    const supplierBids = getBids();
-    setMyBids(supplierBids);
+  const loadMyBids = async () => {
+    try {
+      // Fetch bids from supplier_bids table for the current supplier
+      const { data, error } = await supabase
+        .from('supplier_bids')
+        .select('*')
+        .eq('supplier_id', currentUser.id)
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      
+      // Format the bids data for display
+      const formattedBids = data.map(bid => ({
+        id: bid.bid_id,
+        rfqId: bid.quotation_id,
+        price: bid.bid_price,
+        deliveryDate: bid.bid_delivery,
+        terms: bid.bid_terms,
+        status: 'Submitted', // Default status
+        createdAt: bid.created_at
+      }));
+      
+      setMyBids(formattedBids);
+    } catch (err) {
+      console.error('Error fetching bids:', err);
+      setSnackbar({
+        open: true,
+        message: 'Failed to load bids: ' + err.message,
+        severity: 'error'
+      });
+    }
   };
 
   const handleTabChange = (event, newValue) => {
     setTabValue(newValue);
+  };
+  
+  // Fetch quotations from Supabase
+  const fetchQuotations = async () => {
+    setQuotationsLoading(true);
+    setQuotationsError(null);
+    
+    try {
+      const { data, error } = await supabase
+        .from('quotations')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      
+      setQuotations(data || []);
+    } catch (err) {
+      console.error('Error fetching quotations:', err);
+      setQuotationsError('Failed to load quotations. Please try again.');
+    } finally {
+      setQuotationsLoading(false);
+    }
+  };
+  
+  // Format date for display
+  const formatDate = (dateString) => {
+    try {
+      return new Date(dateString).toLocaleDateString();
+    } catch (e) {
+      return 'Invalid date';
+    }
   };
 
   const handleViewRfq = (rfq) => {
@@ -148,13 +216,13 @@ const BiddingSystem = ({ setSelectedView }) => {
     setNewBid({
       price: '',
       deliveryDate: null,
-      terms: '',
-      documents: []
+      terms: ''
     });
+    setIsEditingBid(false);
     setOpenBidDialog(true);
   };
 
-  const handleSubmitBid = () => {
+  const handleSubmitBid = async () => {
     // Validate form
     if (!newBid.price || !newBid.deliveryDate) {
       setSnackbar({
@@ -165,45 +233,91 @@ const BiddingSystem = ({ setSelectedView }) => {
       return;
     }
 
-    // Submit bid
-    submitBid(selectedRfq.id, newBid);
-    setOpenBidDialog(false);
-    loadMyBids();
-    setSnackbar({
-      open: true,
-      message: 'Bid submitted successfully',
-      severity: 'success'
-    });
+    try {
+      // Format the bid data for Supabase
+      const bidData = {
+        bid_price: parseFloat(newBid.price),
+        bid_delivery: format(newBid.deliveryDate, 'yyyy-MM-dd'),
+        bid_terms: newBid.terms || '',
+        supplier_id: currentUser.id,
+        quotation_id: selectedRfq.quotation_id || selectedRfq.id // Use quotation_id if available, otherwise fall back to id
+      };
+
+      let data, error;
+      
+      if (isEditingBid) {
+        // Find the existing bid to update
+        const existingBid = myBids.find(bid => bid.rfqId === selectedRfq.id && bid.status === 'Submitted');
+        
+        if (!existingBid) {
+          throw new Error('Could not find the bid to update');
+        }
+        
+        // Update existing bid
+        ({ data, error } = await supabase
+          .from('supplier_bids')
+          .update(bidData)
+          .eq('bid_id', existingBid.id)
+          .select());
+          
+        if (error) throw error;
+        
+        setSnackbar({
+          open: true,
+          message: 'Bid updated successfully',
+          severity: 'success'
+        });
+      } else {
+        // Insert new bid
+        ({ data, error } = await supabase
+          .from('supplier_bids')
+          .insert([bidData])
+          .select());
+          
+        if (error) throw error;
+        
+        setSnackbar({
+          open: true,
+          message: 'Bid submitted successfully',
+          severity: 'success'
+        });
+      }
+
+      setOpenBidDialog(false);
+      loadMyBids();
+    } catch (err) {
+      console.error('Error submitting bid:', err);
+      setSnackbar({
+        open: true,
+        message: 'Failed to submit bid: ' + err.message,
+        severity: 'error'
+      });
+    }
   };
 
-  const handleViewBid = (bid) => {
-    setSelectedBid(bid);
-    setOpenViewBidDialog(true);
+  const handleViewBid = async (bid) => {
+    try {
+      // Get quotation details for this bid
+      const quotation = await getQuotationById(bid.rfqId);
+      
+      // Set the bid with quotation details
+      setSelectedBid({
+        ...bid,
+        quotation: quotation
+      });
+      
+      setOpenViewBidDialog(true);
+    } catch (err) {
+      console.error('Error viewing bid details:', err);
+      setSnackbar({
+        open: true,
+        message: 'Failed to load bid details',
+        severity: 'error'
+      });
+    }
   };
 
-  const handleAddDocument = () => {
-    // In a real app, this would handle file uploads
-    // For this demo, we'll just add a mock document
-    const mockDocument = {
-      name: `Document-${newBid.documents.length + 1}.pdf`,
-      size: Math.floor(Math.random() * 1000) + 100, // Random size between 100-1100 KB
-      uploadedAt: new Date().toISOString()
-    };
-    
-    setNewBid({
-      ...newBid,
-      documents: [...newBid.documents, mockDocument]
-    });
-  };
-
-  const handleRemoveDocument = (index) => {
-    const updatedDocuments = [...newBid.documents];
-    updatedDocuments.splice(index, 1);
-    setNewBid({
-      ...newBid,
-      documents: updatedDocuments
-    });
-  };
+  // Document handling functions removed as per requirements
 
   const markAllNotificationsAsRead = () => {
     const updatedNotifications = notifications.map(notification => ({
@@ -213,12 +327,12 @@ const BiddingSystem = ({ setSelectedView }) => {
     setNotifications(updatedNotifications);
   };
 
-  // Render available RFQs
+  // Render available Quotations
   const renderRfqList = () => {
     return (
       <Box>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-          <Typography variant="h6">Available RFQs</Typography>
+          <Typography variant="h6">Available Quotations</Typography>
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
             <Tooltip title="Notifications">
               <IconButton 
@@ -234,7 +348,10 @@ const BiddingSystem = ({ setSelectedView }) => {
             <Button 
               variant="contained" 
               startIcon={<RefreshIcon />} 
-              onClick={loadRfqs}
+              onClick={() => {
+                loadRfqs();
+                fetchQuotations();
+              }}
             >
               Refresh
             </Button>
@@ -287,79 +404,111 @@ const BiddingSystem = ({ setSelectedView }) => {
           </Paper>
         )}
         
-        {rfqs.length === 0 ? (
-          <Paper sx={{ p: 3, textAlign: 'center' }}>
-            <Typography variant="body1" color="textSecondary">
-              No RFQs available at the moment. Check back later.
-            </Typography>
-          </Paper>
-        ) : (
-          <Grid container spacing={3}>
-            {rfqs.map(rfq => (
-              <Grid item xs={12} sm={6} md={4} key={rfq.id}>
-                <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                  <CardContent sx={{ flexGrow: 1 }}>
-                    <Typography variant="h6" gutterBottom noWrap>
-                      {rfq.itemName}
-                    </Typography>
-                    <Chip 
-                      label={rfq.status} 
-                      color={
-                        rfq.status === 'Posted' ? 'primary' :
-                        rfq.status === 'Bidding' ? 'info' :
-                        rfq.status === 'Awarded' ? 'success' :
-                        'default'
-                      }
-                      size="small"
-                      sx={{ mb: 2 }}
-                    />
-                    <Typography variant="body2" color="textSecondary" gutterBottom>
-                      Company: {rfq.companyName}
-                    </Typography>
-                    <Typography variant="body2" color="textSecondary" gutterBottom>
-                      Quantity: {rfq.quantity}
-                    </Typography>
-                    <Typography variant="body2" color="textSecondary" gutterBottom>
-                      Location: {rfq.deliveryLocation}
-                    </Typography>
-                    <Typography variant="body2" color="textSecondary" gutterBottom>
-                      Deadline: {new Date(rfq.bidDeadline).toLocaleDateString()}
-                    </Typography>
-                    {rfq.expectedPrice && (
-                      <Typography variant="body2" color="textSecondary">
-                        Expected Price: ${rfq.expectedPrice}
-                      </Typography>
-                    )}
-                  </CardContent>
-                  <CardActions>
-                    <Button 
-                      size="small" 
-                      color="primary" 
-                      onClick={() => handleViewRfq(rfq)}
-                    >
-                      View Details
-                    </Button>
-                    {(rfq.status === 'Posted' || rfq.status === 'Bidding') && 
-                     isAfter(new Date(rfq.bidDeadline), new Date()) && (
-                      <Button 
-                        size="small" 
-                        color="secondary" 
-                        onClick={() => handleBidOnRfq(rfq)}
-                      >
-                        Place Bid
-                      </Button>
-                    )}
-                  </CardActions>
-                </Card>
-              </Grid>
-            ))}
-          </Grid>
-        )}
+        {/* Quotations Section */}
+        <Box>
+          {quotationsError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {quotationsError}
+            </Alert>
+          )}
+          
+          {quotationsLoading ? (
+            <Box display="flex" justifyContent="center" p={4}>
+              <CircularProgress />
+            </Box>
+          ) : quotations.length === 0 ? (
+            <Paper sx={{ p: 3, textAlign: 'center' }}>
+              <Typography variant="body1" color="textSecondary">
+                No quotations found.
+              </Typography>
+            </Paper>
+          ) : (
+            <TableContainer component={Paper}>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Item</TableCell>
+                    <TableCell>Quantity</TableCell>
+                    <TableCell>Price</TableCell>
+                    <TableCell>Status</TableCell>
+                    <TableCell>Created At</TableCell>
+                    <TableCell>Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {quotations.map((quotation) => (
+                    <TableRow hover key={quotation.quotation_id}>
+                      <TableCell>{quotation.item_name || 'N/A'}</TableCell>
+                      <TableCell>{quotation.quantity || 'N/A'}</TableCell>
+                      <TableCell>
+                        {quotation.expected_price ? `$${parseFloat(quotation.expected_price).toFixed(2)}` : (quotation.price ? `$${parseFloat(quotation.price).toFixed(2)}` : 'N/A')}
+                      </TableCell>
+                      <TableCell>
+                        <Chip 
+                          label={quotation.status || 'Pending'} 
+                          color={
+                            quotation.status?.toLowerCase() === 'approved' ? 'success' :
+                            quotation.status?.toLowerCase() === 'rejected' ? 'error' :
+                            'warning'
+                          } 
+                          size="small" 
+                        />
+                      </TableCell>
+                      <TableCell>{formatDate(quotation.created_at)}</TableCell>
+                      <TableCell>
+                        <Button 
+                          size="small" 
+                          color="secondary" 
+                          onClick={() => handleBidOnRfq({
+                            id: quotation.id,
+                            quotation_id: quotation.quotation_id, // Explicitly include quotation_id
+                            itemName: quotation.item_name,
+                            quantity: quotation.quantity,
+                            expectedPrice: quotation.expected_price || quotation.price,
+                            bidDeadline: new Date().toISOString() // Set a default deadline
+                          })}
+                        >
+                          Add Bid
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </Box>
       </Box>
     );
   };
 
   // Render my bids
+  // Get quotation details by ID
+  const getQuotationById = async (quotationId) => {
+    try {
+      const { data, error } = await supabase
+        .from('quotations')
+        .select('*')
+        .eq('id', quotationId)
+        .single();
+      
+      if (error) throw error;
+      
+      return {
+        id: data.id,
+        quotation_id: data.id, // Explicitly include quotation_id
+        itemName: data.item_name,
+        quantity: data.quantity,
+        expectedPrice: data.expected_price,
+        status: data.status || 'Pending',
+        bidDeadline: data.bid_deadline || new Date().toISOString()
+      };
+    } catch (err) {
+      console.error('Error fetching quotation details:', err);
+      return null;
+    }
+  };
+
   const renderMyBids = () => {
     return (
       <Box>
@@ -368,7 +517,7 @@ const BiddingSystem = ({ setSelectedView }) => {
           <Button 
             variant="contained" 
             startIcon={<RefreshIcon />} 
-            onClick={loadMyBids}
+            onClick={() => loadMyBids()}
           >
             Refresh
           </Button>
@@ -395,10 +544,10 @@ const BiddingSystem = ({ setSelectedView }) => {
               </TableHead>
               <TableBody>
                 {myBids.map(bid => {
-                  const rfq = getRfqById(bid.rfqId);
+                  // We'll fetch quotation details when viewing the bid
                   return (
                     <TableRow key={bid.id}>
-                      <TableCell>{rfq ? rfq.itemName : 'Unknown RFQ'}</TableCell>
+                      <TableCell>Quotation #{bid.rfqId}</TableCell>
                       <TableCell>${bid.price}</TableCell>
                       <TableCell>{new Date(bid.deliveryDate).toLocaleDateString()}</TableCell>
                       <TableCell>
@@ -421,21 +570,22 @@ const BiddingSystem = ({ setSelectedView }) => {
                         >
                           <ViewIcon />
                         </IconButton>
-                        {bid.status === 'Submitted' && rfq && 
-                         (rfq.status === 'Posted' || rfq.status === 'Bidding') && 
-                         isAfter(new Date(rfq.bidDeadline), new Date()) && (
+                        {bid.status === 'Submitted' && (
                           <IconButton 
                             size="small" 
                             color="secondary" 
-                            onClick={() => {
-                              setSelectedRfq(rfq);
-                              setNewBid({
-                                price: bid.price,
-                                deliveryDate: new Date(bid.deliveryDate),
-                                terms: bid.terms || '',
-                                documents: bid.documents || []
-                              });
-                              setOpenBidDialog(true);
+                            onClick={async () => {
+                              const quotation = await getQuotationById(bid.rfqId);
+                              if (quotation) {
+                                setSelectedRfq(quotation);
+                                setNewBid({
+                                  price: bid.price,
+                                  deliveryDate: new Date(bid.deliveryDate),
+                                  terms: bid.terms || ''
+                                });
+                                setIsEditingBid(true);
+                                setOpenBidDialog(true);
+                              }
                             }}
                           >
                             <EditIcon />
@@ -453,13 +603,15 @@ const BiddingSystem = ({ setSelectedView }) => {
     );
   };
 
+
+
   return (
-    <Box>
+    <Box sx={{ width: '100%', p: 3 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
         <IconButton 
           color="primary" 
           sx={{ mr: 2 }}
-          onClick={() => setSelectedView('supplier-selection')}
+          onClick={() => setSelectedView('dashboard')}
         >
           <ArrowBackIcon />
         </IconButton>
@@ -467,20 +619,26 @@ const BiddingSystem = ({ setSelectedView }) => {
           Bidding System
         </Typography>
       </Box>
-
-      <Paper sx={{ mb: 3 }}>
-        <Tabs 
-          value={tabValue} 
-          onChange={handleTabChange} 
+      
+      <Paper sx={{ width: '100%', mb: 2 }}>
+        <Tabs
+          value={tabValue}
+          onChange={handleTabChange}
           indicatorColor="primary"
           textColor="primary"
+          variant="fullWidth"
         >
           <Tab label="Available RFQs" />
           <Tab label="My Bids" />
         </Tabs>
+        
+        <Box sx={{ p: 3 }}>
+          {tabValue === 0 && renderRfqList()}
+          {tabValue === 1 && renderMyBids()}
+        </Box>
       </Paper>
-
-      {tabValue === 0 ? renderRfqList() : renderMyBids()}
+      
+      {/* View RFQ Dialog */}
 
       {/* View RFQ Dialog */}
       <Dialog open={openViewRfqDialog} onClose={() => setOpenViewRfqDialog(false)} maxWidth="md" fullWidth>
@@ -572,9 +730,7 @@ const BiddingSystem = ({ setSelectedView }) => {
       {/* Submit Bid Dialog */}
       <Dialog open={openBidDialog} onClose={() => setOpenBidDialog(false)} maxWidth="md" fullWidth>
         <DialogTitle>
-          {myBids.some(bid => bid.rfqId === selectedRfq?.id && bid.status === 'Submitted') 
-            ? 'Edit Bid' 
-            : 'Submit Bid'}
+          {isEditingBid ? 'Edit Bid' : 'Submit Bid'}
         </DialogTitle>
         <DialogContent>
           {selectedRfq && (
@@ -607,8 +763,13 @@ const BiddingSystem = ({ setSelectedView }) => {
                       label="Delivery Date"
                       value={newBid.deliveryDate}
                       onChange={(date) => setNewBid({...newBid, deliveryDate: date})}
-                      renderInput={(params) => <TextField {...params} fullWidth required />}
                       minDate={new Date()}
+                      slotProps={{
+                        textField: {
+                          fullWidth: true,
+                          required: true
+                        }
+                      }}
                     />
                   </LocalizationProvider>
                 </Grid>
@@ -622,54 +783,7 @@ const BiddingSystem = ({ setSelectedView }) => {
                     onChange={(e) => setNewBid({...newBid, terms: e.target.value})}
                   />
                 </Grid>
-                <Grid item xs={12}>
-                  <Typography variant="subtitle2" gutterBottom>
-                    Attached Documents
-                  </Typography>
-                  <Box sx={{ mb: 2 }}>
-                    <Button
-                      variant="outlined"
-                      startIcon={<AttachFileIcon />}
-                      onClick={handleAddDocument}
-                    >
-                      Add Document
-                    </Button>
-                  </Box>
-                  {newBid.documents.length > 0 ? (
-                    <TableContainer component={Paper} variant="outlined">
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow>
-                            <TableCell>Name</TableCell>
-                            <TableCell>Size</TableCell>
-                            <TableCell>Actions</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {newBid.documents.map((doc, index) => (
-                            <TableRow key={index}>
-                              <TableCell>{doc.name}</TableCell>
-                              <TableCell>{doc.size} KB</TableCell>
-                              <TableCell>
-                                <IconButton 
-                                  size="small" 
-                                  color="error" 
-                                  onClick={() => handleRemoveDocument(index)}
-                                >
-                                  <CloseIcon />
-                                </IconButton>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  ) : (
-                    <Typography variant="body2" color="textSecondary">
-                      No documents attached
-                    </Typography>
-                  )}
-                </Grid>
+
               </Grid>
             </>
           )}
@@ -677,9 +791,7 @@ const BiddingSystem = ({ setSelectedView }) => {
         <DialogActions>
           <Button onClick={() => setOpenBidDialog(false)}>Cancel</Button>
           <Button onClick={handleSubmitBid} variant="contained" color="primary">
-            {myBids.some(bid => bid.rfqId === selectedRfq?.id && bid.status === 'Submitted') 
-              ? 'Update Bid' 
-              : 'Submit Bid'}
+            {isEditingBid ? 'Update Bid' : 'Submit Bid'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -691,9 +803,15 @@ const BiddingSystem = ({ setSelectedView }) => {
           {selectedBid && (
             <Grid container spacing={2} sx={{ mt: 1 }}>
               <Grid item xs={12}>
-                <Typography variant="subtitle2">RFQ</Typography>
+                <Typography variant="subtitle2">Quotation</Typography>
                 <Typography variant="body1">
-                  {getRfqById(selectedBid.rfqId)?.itemName || 'Unknown RFQ'}
+                  {selectedBid.quotation ? selectedBid.quotation.itemName : `Quotation #${selectedBid.rfqId}`}
+                </Typography>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <Typography variant="subtitle2">Item Quantity</Typography>
+                <Typography variant="body1">
+                  {selectedBid.quotation ? selectedBid.quotation.quantity : 'N/A'}
                 </Typography>
               </Grid>
               <Grid item xs={12} sm={6}>
@@ -722,29 +840,7 @@ const BiddingSystem = ({ setSelectedView }) => {
                   <Typography variant="body2">{selectedBid.terms || 'No terms specified'}</Typography>
                 </Paper>
               </Grid>
-              {selectedBid.documents && selectedBid.documents.length > 0 && (
-                <Grid item xs={12}>
-                  <Typography variant="subtitle2">Attached Documents</Typography>
-                  <TableContainer component={Paper} variant="outlined" sx={{ mt: 1 }}>
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow>
-                          <TableCell>Name</TableCell>
-                          <TableCell>Size</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {selectedBid.documents.map((doc, index) => (
-                          <TableRow key={index}>
-                            <TableCell>{doc.name}</TableCell>
-                            <TableCell>{doc.size} KB</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                </Grid>
-              )}
+
               <Grid item xs={12}>
                 <Typography variant="subtitle2">Submitted</Typography>
                 <Typography variant="body2">

@@ -181,7 +181,9 @@ function CompanyDashboard() {
   }
   
   if (companyView === 'biddingSystem') {
-    return <CompanyBiddingSystem setCompanyView={setCompanyView} />
+    // Redirect to the BiddingSystem page instead of rendering the component
+    navigate('/bidding-system');
+    return null;
   }
 
   return (

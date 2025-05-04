@@ -9,6 +9,8 @@ import Dashboard from './pages/Dashboard'
 import SupplierDashboard from './pages/SupplierDashboard'
 import CompanyDashboard from './pages/CompanyDashboard'
 import ConsumerDashboard from './pages/ConsumerDashboard'
+import BiddingSystem from './pages/BiddingSystem'
+import ViewBids from './pages/ViewBids'
 
 function App() {
   const { currentUser, userRole } = useAuth()
@@ -73,6 +75,23 @@ function App() {
               </ProtectedRoute>
             } 
           />
+          <Route 
+            path="/bidding-system" 
+            element={
+              <ProtectedRoute>
+                {userRole === 'company' ? <BiddingSystem /> : <Navigate to="/dashboard" />}
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/view-bids" 
+            element={
+              <ProtectedRoute>
+                {userRole === 'company' ? <ViewBids /> : <Navigate to="/dashboard" />}
+              </ProtectedRoute>
+            } 
+          />
+
           <Route path="*" element={<Navigate to={currentUser ? "/dashboard" : "/login"} />} />
         </Routes>
       </MainLayout>
