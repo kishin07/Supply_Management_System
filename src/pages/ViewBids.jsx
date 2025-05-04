@@ -242,8 +242,8 @@ const ViewBids = () => {
                     <TableCell>{formatDate(bid.bid_delivery)}</TableCell>
                     <TableCell>{new Date(bid.created_at).toLocaleString()}</TableCell>
                     <TableCell>{getBidStatusChip(bid.status)}</TableCell>
-npm                    <TableCell>
-                      {bid.status === 'pending' && (
+                    <TableCell>
+                      {
                         <Box sx={{ display: 'flex', gap: 1 }}>
                           <Button 
                             size="small" 
@@ -262,7 +262,7 @@ npm                    <TableCell>
                             Reject
                           </Button>
                         </Box>
-                      )}
+                      }
                     </TableCell>
                   </TableRow>
                 ))}
